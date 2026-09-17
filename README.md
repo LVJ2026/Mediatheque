@@ -1,38 +1,60 @@
 # Mediatheque
 
-Application de reservation de ressources pour la mediatheque de l'Education nationale.
+Application JavaScript de reservation de ressources pour la mediatheque de l'Education nationale.
 
 ## Architecture
 
-- `app/` : application Python, FastAPI pour l'API et Flask pour les pages HTML.
-- `worker/` : Cloudflare Worker, proxy HTTPS vers l'application Python.
-- Grist : source de donnees des tables `Inventaire des jeux` et `Emprunts`.
+- `worker/public/` : interface web statique JavaScript.
+- `worker/functions/` : Cloudflare Pages Functions, API JavaScript connectee a Grist.
+- Grist : source des tables `Inventaire_des_jeux` et `Table1`.
 
-## Demarrage local
+## Deploiement Cloudflare Pages
 
-```powershell
-python -m venv .venv
-.\\.venv\\Scripts\\Activate.ps1
-pip install -r requirements.txt
-Copy-Item .env.example .env
-uvicorn app.main:app --reload
+Connecter le depot GitHub avec :
+
+- Root directory : `worker`
+- Framework preset : `None`
+- Build command : vide
+- Build output directory : `public`
+
+Dans **Settings > Environment variables**, ajouter pour Production et Preview :
+
+```text
+GRIST_API_KEY=ta-cle-api-grist
+GRIST_DOC_ID=iSya7D8N4oHCP1GrHQGzRB
+GRIST_BASE_URL=https://grist.numerique.gouv.fr
+GRIST_INVENTORY_TABLE=Inventaire_des_jeux
+GRIST_LOANS_TABLE=Table1
+GRIST_ENABLED=true
 ```
 
-Ouvrir http://127.0.0.1:8000. Tant que `GRIST_ENABLED=false`, l'interface utilise trois jeux d'exemple et aucune reservation persistante. Pour connecter Grist, renseigner les variables dans `.env`, puis definir `GRIST_ENABLED=true`.
+Les secrets Grist doivent etre saisis dans Cloudflare, jamais dans GitHub.
 
-Les noms de colonnes attendus sont exactement :
+## Developpement local
 
-- `Inventaire des jeux` : `Jeu`, `Marque`, `Âge indiqué`, `Joueurs`, `Remarques`.
-- `Emprunts` : `Nom`, `Prénom`, `Mail professionnel`, `Ecole`, `Date Emprunt`, `Retour`, `Jeu`.
-
-## Worker Cloudflare
-
-Depuis `worker/`, installer Wrangler puis adapter `ORIGIN_URL` dans `wrangler.toml` :
+Installer Node.js LTS, puis depuis `worker/` :
 
 ```powershell
+npm install
+Copy-Item .dev.vars.example .dev.vars
+npx wrangler pages dev public
+```
+
+Le fichier `.dev.vars` contient les variables locales et ne doit jamais etre committe.
+
+## Deploiement manuel
+
+```powershell
+cd worker
 npm install
 npx wrangler login
 npm run deploy
 ```
 
-Le Worker ne contient aucune clé Grist : elles restent uniquement dans l'environnement de l'application Python.
+## Colonnes Grist attendues
+
+Inventaire : `Jeu`, `Marque`, `Age_indique`, `Joueurs`, `Remarques`.
+
+Emprunts (`Table1`) : `Nom`, `Prenom`, `Mail_professionnel`, `Ecole`, `Date_Emprunt`, `Retour`, `Jeu`.
+
+Une reservation groupant plusieurs jeux cree une ligne Grist par jeu, pour la meme periode de 21 jours.
