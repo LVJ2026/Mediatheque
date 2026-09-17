@@ -14,7 +14,7 @@ Connecter le depot GitHub avec :
 
 - Root directory : laisser vide (le dossier `public/` est maintenant a la racine du depot)
 - Framework preset : `None`
-- Build command : vide
+- Build command : `npm run build`
 - Build output directory : `public`
 
 Les dossiers `public/` et `functions/` sont directement a la racine pour que Cloudflare les detecte automatiquement.
@@ -58,6 +58,8 @@ Depuis la racine du depot, le deploiement direct est :
 ```powershell
 npx wrangler pages deploy public --project-name mediatheque-reservations
 ```
+
+Ne pas utiliser `npx wrangler deploy` : cette commande concerne les Workers classiques et produit une erreur dans un projet Pages. Pour un deploiement Git Cloudflare Pages, utiliser `npm run build` comme commande de build ; Cloudflare publie ensuite `public/`.
 
 ## Colonnes Grist attendues
 

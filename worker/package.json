@@ -1,6 +1,6 @@
 {
   "name": "mediatheque-worker",
   "private": true,
-  "scripts": { "dev": "wrangler pages dev public", "deploy": "wrangler pages deploy public --project-name mediatheque-reservations" },
+  "scripts": { "build": "node -e \"console.log('Cloudflare Pages: fichiers statiques deja prets')\"", "dev": "wrangler pages dev public", "deploy": "wrangler pages deploy public --project-name mediatheque-reservations" },
   "devDependencies": { "wrangler": "^3.99.0" }
 }
