@@ -1,0 +1,16 @@
+{% extends 'base.html' %}
+{% block title %}Accueil | Médiathèque{% endblock %}
+{% block content %}
+<section class="hero home-hero">
+  <p class="eyebrow">Centre de ressources · Éducation nationale</p>
+  <h1>Choisir une ressource<br><em>à faire circuler.</em></h1>
+  <p class="lede">Consultez les collections de la médiathèque et réservez le matériel dont votre classe a besoin.</p>
+</section>
+<section class="collection-grid" aria-label="Collections">
+  <a class="collection-card collection-digital" href="#"><span class="card-index">01</span><strong>Matériel<br>Numérique</strong><span class="card-arrow">↗</span></a>
+  <a class="collection-card collection-games" href="/jeux"><span class="card-index">02</span><strong>Jeux</strong><span class="card-arrow">↗</span></a>
+  <a class="collection-card collection-books" href="#"><span class="card-index">03</span><strong>Livres<br>Pédagogiques</strong><span class="card-arrow">↗</span></a>
+  <a class="collection-card collection-series" href="#"><span class="card-index">04</span><strong>Séries de<br>livres / albums</strong><span class="card-arrow">↗</span></a>
+  <a class="collection-card collection-science" href="#"><span class="card-index">05</span><strong>Matériel<br>Sciences</strong><span class="card-arrow">↗</span></a>
+</section>
+{% endblock %}
