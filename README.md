@@ -17,6 +17,8 @@ Connecter le depot GitHub avec :
 - Build command : vide
 - Build output directory : `public`
 
+Ces chemins sont relatifs au repertoire racine `worker`. Si **Root directory** reste vide, Cloudflare cherche `public` a la racine du depot et affiche l'erreur indiquant qu'aucun dossier de fichiers statiques n'a ete trouve.
+
 Dans **Settings > Environment variables**, ajouter pour Production et Preview :
 
 ```text
@@ -49,6 +51,12 @@ cd worker
 npm install
 npx wrangler login
 npm run deploy
+```
+
+Depuis la racine du depot, le deploiement direct equivalent est :
+
+```powershell
+npx wrangler pages deploy worker/public --project-name mediatheque-reservations
 ```
 
 ## Colonnes Grist attendues
