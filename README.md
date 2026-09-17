@@ -12,12 +12,12 @@ Application JavaScript de reservation de ressources pour la mediatheque de l'Edu
 
 Connecter le depot GitHub avec :
 
-- Root directory : `worker`
+- Root directory : laisser vide (le dossier `public/` est maintenant a la racine du depot)
 - Framework preset : `None`
 - Build command : vide
 - Build output directory : `public`
 
-Ces chemins sont relatifs au repertoire racine `worker`. Si **Root directory** reste vide, Cloudflare cherche `public` a la racine du depot et affiche l'erreur indiquant qu'aucun dossier de fichiers statiques n'a ete trouve.
+Les dossiers `public/` et `functions/` sont directement a la racine pour que Cloudflare les detecte automatiquement.
 
 Dans **Settings > Environment variables**, ajouter pour Production et Preview :
 
@@ -53,10 +53,10 @@ npx wrangler login
 npm run deploy
 ```
 
-Depuis la racine du depot, le deploiement direct equivalent est :
+Depuis la racine du depot, le deploiement direct est :
 
 ```powershell
-npx wrangler pages deploy worker/public --project-name mediatheque-reservations
+npx wrangler pages deploy public --project-name mediatheque-reservations
 ```
 
 ## Colonnes Grist attendues
