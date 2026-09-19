@@ -28,9 +28,10 @@ GRIST_BASE_URL=https://grist.numerique.gouv.fr
 GRIST_INVENTORY_TABLE=Inventaire_des_jeux
 GRIST_LOANS_TABLE=Table1
 GRIST_ENABLED=true
+MANAGER_PASSWORD=mot-de-passe-gestionnaire
 ```
 
-Les secrets Grist doivent etre saisis dans Cloudflare, jamais dans GitHub.
+Les secrets Grist et le mot de passe gestionnaire doivent etre saisis dans Cloudflare, jamais dans GitHub. Le mot de passe permet d’avancer la date de retour, d’imprimer une fiche d’emprunt et de supprimer une réservation.
 
 ## Developpement local
 
