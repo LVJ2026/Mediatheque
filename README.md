@@ -26,7 +26,7 @@ GRIST_API_KEY=ta-cle-api-grist
 GRIST_DOC_ID=iSya7D8N4oHCP1GrHQGzRB
 GRIST_BASE_URL=https://grist.numerique.gouv.fr
 GRIST_INVENTORY_TABLE=Inventaire_des_jeux
-GRIST_LOANS_TABLE=Table1
+GRIST_LOANS_TABLE=Emprunts
 GRIST_ENABLED=true
 MANAGER_PASSWORD=mot-de-passe-gestionnaire
 ```

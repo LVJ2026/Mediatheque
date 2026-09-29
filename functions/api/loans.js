@@ -3,7 +3,7 @@ import { assertConfigured, gristRequest, normalizeLoan } from '../_grist.js';
 export async function onRequestGet({ env }) {
   try {
     assertConfigured(env);
-    const payload = await gristRequest(env, env.GRIST_LOANS_TABLE || 'Table1');
+    const payload = await gristRequest(env, env.GRIST_LOANS_TABLE || 'Emprunts');
     const records = (payload.records || []).filter((record) => {
       const fields = record.fields || {};
       return fields.Jeu != null && (fields.Date_Emprunt != null || fields['Date Emprunt'] != null);

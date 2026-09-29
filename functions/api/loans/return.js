@@ -7,7 +7,7 @@ export async function onRequestPost({ request, env }) {
     assertConfigured(env);
     const { id, return_date: returnDate } = await request.json();
     if (!Number.isInteger(Number(id)) || !/^\d{4}-\d{2}-\d{2}$/.test(returnDate || '')) return Response.json({ detail: 'Date de retour invalide.' }, { status: 422 });
-    const payload = await gristRequest(env, env.GRIST_LOANS_TABLE || 'Table1', {
+    const payload = await gristRequest(env, env.GRIST_LOANS_TABLE || 'Emprunts', {
       method: 'PATCH',
       body: JSON.stringify({ records: [{ id: Number(id), fields: { Retour: returnDate } }] }),
     });

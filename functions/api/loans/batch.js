@@ -8,7 +8,7 @@ export async function onRequestPost({ request, env }) {
       return Response.json({ detail: 'Tous les champs et au moins un jeu sont obligatoires.' }, { status: 422 });
     }
 
-    const loansPayload = await gristRequest(env, env.GRIST_LOANS_TABLE || 'Table1');
+    const loansPayload = await gristRequest(env, env.GRIST_LOANS_TABLE || 'Emprunts');
     const existing = (loansPayload.records || []).map(normalizeLoan);
     const requestedEnd = addDays(input.loan_date, 20);
     const conflict = input.game_ids.some((gameId) => existing.some((loan) => loan.game_id === Number(gameId) && input.loan_date <= loan.return_date && requestedEnd >= loan.loan_date));
@@ -24,7 +24,7 @@ export async function onRequestPost({ request, env }) {
       Retour: returnDate,
       Jeu: Number(gameId),
     }}));
-    const created = await gristRequest(env, env.GRIST_LOANS_TABLE || 'Table1', {
+    const created = await gristRequest(env, env.GRIST_LOANS_TABLE || 'Emprunts', {
       method: 'POST',
       body: JSON.stringify({ records }),
     });
