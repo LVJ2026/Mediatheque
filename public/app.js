@@ -8,7 +8,9 @@ const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, (character
 async function loadGames() {
   const [gamesResponse, loansResponse] = await Promise.all([fetch('/api/games'), fetch('/api/loans')]);
   if (!gamesResponse.ok || !loansResponse.ok) throw new Error('Impossible de charger les données Grist.');
-  state.games = await gamesResponse.json(); state.loans = (await loansResponse.json()).filter((loan) => !state.cancelledLoanIds.has(String(loan.id))).map((loan) => ({ ...loan, ...(state.localReturnDates[String(loan.id)] || {}) }));
+  state.games = await gamesResponse.json();
+  console.table(state.games.map(({ id, Jeu }) => ({ id, Jeu })));
+  state.loans = (await loansResponse.json()).filter((loan) => !state.cancelledLoanIds.has(String(loan.id))).map((loan) => ({ ...loan, ...(state.localReturnDates[String(loan.id)] || {}) }));
   loadSchools();
   $('#game-count').textContent = `${state.games.length} jeu${state.games.length > 1 ? 'x' : ''}`;
   $('#games-body').innerHTML = state.games.map((game) => `<tr data-game-id="${game.id}"><td class="selection-cell"><input type="radio" name="selected-game" aria-label="Sélectionner ${escapeHtml(game.Jeu)}"></td><td><strong>${escapeHtml(game.Jeu)}</strong></td><td>${escapeHtml(game.Marque) || '—'}</td><td>${escapeHtml(game['Âge indiqué']) || '—'}</td><td>${escapeHtml(game.Joueurs) || '—'}</td><td>${escapeHtml(game.Remarques) || '—'}</td></tr>`).join('');
