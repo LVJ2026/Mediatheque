@@ -25,7 +25,12 @@ function assertConfigured(env) {
 }
 
 function toDate(value) {
-  if (typeof value === 'number') return new Date(value * 1000).toISOString().slice(0, 10);
+  if (typeof value === 'number') {
+    const timestamp = Math.abs(value) < 100_000_000_000 ? value * 1000 : value;
+    const date = new Date(timestamp);
+    if (Number.isNaN(date.getTime())) throw new Error('Date invalide reçue depuis Grist.');
+    return date.toISOString().slice(0, 10);
+  }
   return String(value).slice(0, 10);
 }
 
