@@ -61,4 +61,4 @@ function normalizeLoan(record) {
   };
 }
 
-export { addDays, assertConfigured, gristRequest, normalizeGame, normalizeLoan };
+export { addDays, assertConfigured, gristRequest, normalizeGame, normalizeLoan }; 
