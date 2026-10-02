@@ -67,6 +67,7 @@ async function submitLoan(event) {
   renderCalendar();
   const returnDate = result[0]?.return_date || endDate;
   if (printWindow) printSheet('Fiche d’emprunt', data, state.selectedGames, loanDate, returnDate, printWindow);
+  toggleGame(gameIds[0]);
   showToast(printWindow ? 'Réservation enregistrée. La fiche est prête à imprimer en PDF.' : 'Réservation enregistrée; autorisez les fenêtres surgissantes pour imprimer la fiche.');
 }
 async function loginManager(event) { event.preventDefault(); const form = event.currentTarget; const response = await fetch('/api/manager/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: form.password.value }) }); const result = await response.json(); if (!response.ok) { $('#manager-error').textContent = result.detail || 'Connexion impossible.'; return; } state.manager = true; form.reset(); $('#manager-modal').hidden = true; $('#manager-button').textContent = 'Gestionnaire connecté'; if (state.selectedGames.length) renderCalendar(); showToast('Mode gestionnaire activé.'); }
