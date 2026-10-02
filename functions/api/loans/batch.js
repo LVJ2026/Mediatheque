@@ -22,7 +22,7 @@ export async function onRequestPost({ request, env }) {
       Date_Emprunt: input.loan_date,
       Jeu: Number(gameId),
     }}));
-    await gristRequest(env, env.GRIST_LOANS_TABLE || 'Emprunts', {
+    const created = await gristRequest(env, env.GRIST_LOANS_TABLE || 'Emprunts', {
       method: 'POST',
       body: JSON.stringify({ records }),
     });
