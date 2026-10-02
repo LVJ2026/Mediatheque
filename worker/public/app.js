@@ -10,11 +10,40 @@ async function loadGames() {
   state.games = await gamesResponse.json(); state.loans = await loansResponse.json();
   loadSchools();
   $('#game-count').textContent = `${state.games.length} jeu${state.games.length > 1 ? 'x' : ''}`;
-  $('#games-body').innerHTML = state.games.map((game) => `<tr data-game-id="${game.id}"><td class="selection-cell"><input type="radio" name="selected-game" aria-label="Sélectionner ${escapeHtml(game.Jeu)}"></td><td><strong>${escapeHtml(game.Jeu)}</strong></td><td>${escapeHtml(game.Marque) || '—'}</td><td>${escapeHtml(game['Âge indiqué']) || '—'}</td><td>${escapeHtml(game.Joueurs) || '—'}</td><td>${escapeHtml(game.Remarques) || '—'}</td></tr>`).join('');
+  $('#games-body').innerHTML = state.games.map((game) => `<tr data-game-id="${game.id}"><td class="selection-cell"><input type="checkbox" aria-label="Sélectionner ${escapeHtml(game.Jeu)}"></td><td><strong>${escapeHtml(game.Jeu)}</strong></td><td>${escapeHtml(game.Marque) || '—'}</td><td>${escapeHtml(game['Âge indiqué']) || '—'}</td><td>${escapeHtml(game.Joueurs) || '—'}</td><td>${escapeHtml(game.Remarques) || '—'}</td></tr>`).join('');
   document.querySelectorAll('#games-body tr').forEach((row) => { row.addEventListener('click', () => toggleGame(Number(row.dataset.gameId))); const checkbox = row.querySelector('input'); checkbox.addEventListener('click', (event) => event.stopPropagation()); checkbox.addEventListener('change', () => toggleGame(Number(row.dataset.gameId))); });
 }
 async function loadSchools() { const input = $('input[name="school"]'); if (!input || input.tagName === 'SELECT') return; const style = getComputedStyle(input); const select = document.createElement('select'); select.name = 'school'; select.required = true; select.style.cssText = `width:${style.width};padding:${style.padding};font:${style.font};color:${style.color};background:${style.backgroundColor};border:${style.border};border-radius:${style.borderRadius};`; const loading = new Option('Chargement des écoles…', ''); loading.disabled = true; loading.selected = true; select.add(loading); input.replaceWith(select); try { const response = await fetch('/api/schools'); if (!response.ok) throw new Error('Liste des écoles indisponible.'); const schools = await response.json(); select.replaceChildren(new Option(schools.length ? 'Choisir une école' : 'Aucune école trouvée', '')); select.options[0].disabled = true; select.options[0].selected = true; schools.forEach((school) => select.add(new Option(school, school))); } catch { select.replaceChildren(new Option('Liste des écoles indisponible', '')); select.options[0].disabled = true; select.options[0].selected = true; } }
-function toggleGame(id) { const game = state.games.find((item) => item.id === id); state.selectedGames = state.selectedGames.some((item) => item.id === id) ? [] : [game]; document.querySelectorAll('#games-body tr').forEach((row) => { const selected = state.selectedGames.some((item) => item.id === Number(row.dataset.gameId)); row.classList.toggle('selected', selected); row.querySelector('input').checked = selected; }); $('#empty-calendar').hidden = !state.selectedGames.length; $('#calendar-content').hidden = !state.selectedGames.length; if (state.selectedGames.length) { $('#selected-game').textContent = state.selectedGames.map((item) => item.Jeu).join(' + '); renderCalendar(); } }
+function toggleGame(id) {
+  const game = state.games.find((item) => item.id === id);
+  if (!game) return;
+  const selected = state.selectedGames.some((item) => item.id === id);
+  state.selectedGames = selected
+    ? state.selectedGames.filter((item) => item.id !== id)
+    : [...state.selectedGames, game];
+  document.querySelectorAll('#games-body tr').forEach((row) => {
+    const isSelected = state.selectedGames.some((item) => item.id === Number(row.dataset.gameId));
+    row.classList.toggle('selected', isSelected);
+    row.querySelector('input').checked = isSelected;
+  });
+  $('#empty-calendar').hidden = state.selectedGames.length > 0;
+  $('#calendar-content').hidden = state.selectedGames.length === 0;
+  if (state.selectedGames.length) {
+    $('#selected-game').textContent = state.selectedGames.length === 1
+      ? state.selectedGames[0].Jeu
+      : `${state.selectedGames.length} jeux sélectionnés`;
+    renderCalendar();
+  }
+}
+function clearGameSelection() {
+  state.selectedGames = [];
+  document.querySelectorAll('#games-body tr').forEach((row) => {
+    row.classList.remove('selected');
+    row.querySelector('input').checked = false;
+  });
+  $('#empty-calendar').hidden = false;
+  $('#calendar-content').hidden = true;
+}
 function occupiedDates() { const selectedIds = new Set(state.selectedGames.map((game) => game.id)); const days = new Set(); state.loans.filter((loan) => selectedIds.has(loan.game_id)).forEach((loan) => { const day = new Date(`${loan.loan_date}T12:00:00`); const end = new Date(`${loan.occupied_until || loan.return_date}T12:00:00`); while (day <= end) { days.add(iso(day)); day.setDate(day.getDate() + 1); } }); return days; }
 function allBookings() { const grouped = new Map(); state.loans.forEach((loan) => { const key = [loan.name, loan.first_name, loan.professional_email, loan.school, loan.loan_date, loan.return_date, loan.game_id].join('\u001f'); if (!grouped.has(key)) grouped.set(key, { ...loan, ids: [], entries: [] }); const booking = grouped.get(key); booking.ids.push(loan.id); booking.entries.push(loan); }); return [...grouped.values()]; }
 function loansForDate(date) { const selectedIds = new Set(state.selectedGames.map((game) => game.id)); return allBookings().filter((booking) => booking.entries.some((loan) => selectedIds.has(loan.game_id) && loan.loan_date <= date && date <= (loan.occupied_until || loan.return_date))); }
@@ -67,7 +96,7 @@ async function submitLoan(event) {
   renderCalendar();
   const returnDate = result[0]?.return_date || endDate;
   if (printWindow) printSheet('Fiche d’emprunt', data, state.selectedGames, loanDate, returnDate, printWindow);
-  toggleGame(gameIds[0]);
+  clearGameSelection();
   showToast(printWindow ? 'Réservation enregistrée. La fiche est prête à imprimer en PDF.' : 'Réservation enregistrée; autorisez les fenêtres surgissantes pour imprimer la fiche.');
 }
 async function loginManager(event) { event.preventDefault(); const form = event.currentTarget; const response = await fetch('/api/manager/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: form.password.value }) }); const result = await response.json(); if (!response.ok) { $('#manager-error').textContent = result.detail || 'Connexion impossible.'; return; } state.manager = true; form.reset(); $('#manager-modal').hidden = true; $('#manager-button').textContent = 'Gestionnaire connecté'; if (state.selectedGames.length) renderCalendar(); showToast('Mode gestionnaire activé.'); }
