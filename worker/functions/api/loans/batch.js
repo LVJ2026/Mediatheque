@@ -1,4 +1,5 @@
-import { addDays, assertConfigured, gristRequest, normalizeLoan } from '../../_grist.js';
+import { assertConfigured, gristRequest, normalizeLoan } from '../../_grist.js';
+import { sendMail } from '../../_mail.js';
 
 function isValidDate(value) {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
@@ -43,7 +44,32 @@ export async function onRequestPost({ request, env }) {
       id: created.records?.[index]?.id,
       fields: records[index].fields,
     }));
-    return Response.json(loans, { status: 201 });
+
+    let emailSent = false;
+    try {
+      const gamesById = new Map();
+      try {
+        const gamesPayload = await gristRequest(env, env.GRIST_INVENTORY_TABLE || 'Inventaire_des_jeux');
+        for (const record of gamesPayload.records || []) {
+          gamesById.set(Number(record.id), record.fields?.Jeu || `Jeu ${record.id}`);
+        }
+      } catch (error) {
+        console.error('Noms des jeux indisponibles pour le courriel :', error.message);
+      }
+      const gameNames = input.game_ids.map((gameId) => gamesById.get(Number(gameId)) || `Jeu ${gameId}`);
+      const formatDate = (value) => new Intl.DateTimeFormat('fr-FR', { dateStyle: 'long', timeZone: 'UTC' }).format(new Date(`${value}T12:00:00Z`));
+      const gameList = gameNames.map((name) => `- ${name}`).join('\n');
+      await sendMail(env, {
+        to: input.professional_email,
+        subject: 'Confirmation de votre réservation',
+        text: `Bonjour ${input.first_name} ${input.name},\n\nVotre réservation est confirmée pour :\n${gameList}\n\nDu ${formatDate(input.loan_date)} au ${formatDate(input.end_date)}.\n\nMédiathèque`,
+      });
+      emailSent = true;
+    } catch (error) {
+      console.error('Échec de l’envoi du courriel de confirmation :', error.message);
+    }
+
+    return Response.json(loans, { status: 201, headers: { 'X-Email-Sent': String(emailSent) } });
   } catch (error) {
     return Response.json({ detail: error.message }, { status: 503 });
   }
