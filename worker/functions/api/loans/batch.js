@@ -7,7 +7,34 @@ function isValidDate(value) {
   return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
 }
 
-export async function onRequestPost({ request, env }) {
+async function sendConfirmationEmail(env, input) {
+  try {
+    const gamesById = new Map();
+    try {
+      const gamesPayload = await gristRequest(env, env.GRIST_INVENTORY_TABLE || 'Inventaire_des_jeux');
+      for (const record of gamesPayload.records || []) {
+        gamesById.set(Number(record.id), record.fields?.Jeu || `Jeu ${record.id}`);
+      }
+    } catch (error) {
+      console.error('Noms des jeux indisponibles pour le courriel :', error.message);
+    }
+    const gameNames = input.game_ids.map((gameId) => gamesById.get(Number(gameId)) || `Jeu ${gameId}`);
+    const formatDate = (value) => new Intl.DateTimeFormat('fr-FR', { dateStyle: 'long', timeZone: 'UTC' }).format(new Date(`${value}T12:00:00Z`));
+    const gameList = gameNames.map((name) => `- ${name}`).join('\n');
+    await sendMail(env, {
+      to: input.professional_email,
+      subject: 'Confirmation de votre réservation',
+      text: `Bonjour ${input.first_name} ${input.name},\n\nVotre réservation est confirmée pour :\n${gameList}\n\nDu ${formatDate(input.loan_date)} au ${formatDate(input.end_date)}.\n\nMédiathèque`,
+    });
+    return { sent: true, error: '' };
+  } catch (error) {
+    const message = String(error.message || 'Erreur SMTP inconnue').slice(0, 200);
+    console.error('Échec de l’envoi du courriel de confirmation :', message);
+    return { sent: false, error: message };
+  }
+}
+
+export async function onRequestPost({ request, env, waitUntil }) {
   try {
     assertConfigured(env);
     const input = await request.json();
@@ -45,34 +72,15 @@ export async function onRequestPost({ request, env }) {
       fields: records[index].fields,
     }));
 
-    let emailSent = false;
-    let emailError = '';
-    try {
-      const gamesById = new Map();
-      try {
-        const gamesPayload = await gristRequest(env, env.GRIST_INVENTORY_TABLE || 'Inventaire_des_jeux');
-        for (const record of gamesPayload.records || []) {
-          gamesById.set(Number(record.id), record.fields?.Jeu || `Jeu ${record.id}`);
-        }
-      } catch (error) {
-        console.error('Noms des jeux indisponibles pour le courriel :', error.message);
-      }
-      const gameNames = input.game_ids.map((gameId) => gamesById.get(Number(gameId)) || `Jeu ${gameId}`);
-      const formatDate = (value) => new Intl.DateTimeFormat('fr-FR', { dateStyle: 'long', timeZone: 'UTC' }).format(new Date(`${value}T12:00:00Z`));
-      const gameList = gameNames.map((name) => `- ${name}`).join('\n');
-      await sendMail(env, {
-        to: input.professional_email,
-        subject: 'Confirmation de votre réservation',
-        text: `Bonjour ${input.first_name} ${input.name},\n\nVotre réservation est confirmée pour :\n${gameList}\n\nDu ${formatDate(input.loan_date)} au ${formatDate(input.end_date)}.\n\nMédiathèque`,
-      });
-      emailSent = true;
-    } catch (error) {
-      emailError = String(error.message || 'Erreur SMTP inconnue').slice(0, 200);
-      console.error('Échec de l’envoi du courriel de confirmation :', error.message);
+    const emailTask = sendConfirmationEmail(env, input);
+    if (typeof waitUntil === 'function') {
+      waitUntil(emailTask);
+      return Response.json(loans, { status: 201, headers: { 'X-Email-Status': 'pending' } });
     }
 
-    const headers = { 'X-Email-Sent': String(emailSent) };
-    if (emailError) headers['X-Email-Error'] = encodeURIComponent(emailError);
+    const emailResult = await emailTask;
+    const headers = { 'X-Email-Status': emailResult.sent ? 'sent' : 'failed' };
+    if (emailResult.error) headers['X-Email-Error'] = encodeURIComponent(emailResult.error);
     return Response.json(loans, { status: 201, headers });
   } catch (error) {
     return Response.json({ detail: error.message }, { status: 503 });

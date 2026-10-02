@@ -99,13 +99,15 @@ async function submitLoan(event) {
   const returnDate = result[0]?.return_date || endDate;
   if (printWindow) printSheet('Fiche d’emprunt', data, state.selectedGames, loanDate, returnDate, printWindow);
   clearGameSelection();
-  const emailSent = response.headers.get('X-Email-Sent') === 'true';
+  const emailStatus = response.headers.get('X-Email-Status');
   const emailError = response.headers.get('X-Email-Error');
   const printStatus = printWindow ? 'La fiche est prête à imprimer en PDF.' : 'Autorisez les fenêtres surgissantes pour imprimer la fiche.';
-  const emailStatus = emailSent
-    ? 'Le courriel de confirmation a été envoyé.'
-    : `Échec du courriel : ${emailError ? decodeURIComponent(emailError) : 'aucun détail reçu'}.`;
-  showToast(`Réservation enregistrée. ${printStatus} ${emailStatus}`);
+  const emailMessage = emailStatus === 'pending'
+    ? 'Le courriel de confirmation est en cours d’envoi.'
+    : emailStatus === 'sent'
+      ? 'Le courriel de confirmation a été envoyé.'
+      : `Échec du courriel : ${emailError ? decodeURIComponent(emailError) : 'aucun détail reçu'}.`;
+  showToast(`Réservation enregistrée. ${printStatus} ${emailMessage}`);
 }
 async function loginManager(event) { event.preventDefault(); const form = event.currentTarget; const response = await fetch('/api/manager/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: form.password.value }) }); const result = await response.json(); if (!response.ok) { $('#manager-error').textContent = result.detail || 'Connexion impossible.'; return; } state.manager = true; form.reset(); $('#manager-modal').hidden = true; $('#manager-button').textContent = 'Gestionnaire connecté'; if (state.selectedGames.length) renderCalendar(); showToast('Mode gestionnaire activé.'); }
 function openManagerModal() { $('#manager-error').textContent = ''; $('#manager-modal').hidden = false; $('#manager-password').focus(); }
