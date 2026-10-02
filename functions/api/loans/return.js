@@ -1,6 +1,26 @@
+import { assertConfigured, gristRequest } from '../../_grist.js';
 import { isManager, unauthorized } from '../../_manager.js';
 
 export async function onRequestPost({ request, env }) {
   if (!await isManager(request, env)) return unauthorized();
-  return Response.json({ detail: 'Les dates de retour sont gérées localement dans le navigateur.' }, { status: 410 });
+  try {
+    assertConfigured(env);
+    const input = await request.json();
+    const parsedDate = new Date(`${input.return_date}T12:00:00`);
+    const validDate = typeof input.return_date === 'string'
+      && /^\d{4}-\d{2}-\d{2}$/.test(input.return_date)
+      && Number.isFinite(parsedDate.getTime())
+      && parsedDate.toISOString().slice(0, 10) === input.return_date;
+    if (!Array.isArray(input.loan_ids) || !input.loan_ids.length || !input.loan_ids.every((id) => Number.isInteger(Number(id)) && Number(id) > 0) || !validDate) {
+      return Response.json({ detail: 'Identifiants ou date de retour invalides.' }, { status: 422 });
+    }
+    const records = input.loan_ids.map((id) => ({ id: Number(id), fields: { Retour: input.return_date } }));
+    await gristRequest(env, env.GRIST_LOANS_TABLE || 'Emprunts', {
+      method: 'PATCH',
+      body: JSON.stringify({ records }),
+    });
+    return Response.json({ updated: records.length });
+  } catch (error) {
+    return Response.json({ detail: error.message }, { status: 503 });
+  }
 }

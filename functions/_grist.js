@@ -48,7 +48,10 @@ function normalizeGame(record) {
 function normalizeLoan(record) {
   const fields = record.fields || {};
   const loanDate = toDate(fields.Date_Emprunt ?? fields['Date Emprunt']);
-  const returnDate = fields.Retour == null || fields.Retour === '' ? addDays(loanDate, 20) : toDate(fields.Retour);
+  const actualReturnDate = fields.Retour == null || fields.Retour === '' ? null : toDate(fields.Retour);
+  const cancelledDate = fields.Date_Annulation == null || fields.Date_Annulation === '' ? null : toDate(fields.Date_Annulation);
+  const returnDate = cancelledDate || actualReturnDate || addDays(loanDate, 20);
+  const occupiedUntil = cancelledDate || actualReturnDate ? addDays(returnDate, -1) : returnDate;
   return {
     id: record.id,
     name: fields.Nom || '',
@@ -58,6 +61,8 @@ function normalizeLoan(record) {
     loan_date: loanDate,
     game_id: Number(fields.Jeu),
     return_date: returnDate,
+    occupied_until: occupiedUntil,
+    cancelled_date: cancelledDate,
   };
 }
 
