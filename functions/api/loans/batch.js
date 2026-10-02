@@ -26,7 +26,11 @@ export async function onRequestPost({ request, env }) {
       method: 'POST',
       body: JSON.stringify({ records }),
     });
-    return Response.json((created.records || []).map((record) => normalizeLoan(record)), { status: 201 });
+    const loans = input.game_ids.map((gameId, index) => normalizeLoan({
+      id: created.records?.[index]?.id,
+      fields: records[index].fields,
+    }));
+    return Response.json(loans, { status: 201 });
   } catch (error) {
     return Response.json({ detail: error.message }, { status: 503 });
   }
