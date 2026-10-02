@@ -14,14 +14,12 @@ export async function onRequestPost({ request, env }) {
     const conflict = input.game_ids.some((gameId) => existing.some((loan) => loan.game_id === Number(gameId) && input.loan_date <= loan.return_date && requestedEnd >= loan.loan_date));
     if (conflict) return Response.json({ detail: 'Au moins un jeu est déjà réservé sur cette période.' }, { status: 409 });
 
-    const returnDate = requestedEnd;
     const records = input.game_ids.map((gameId) => ({ fields: {
       Nom: input.name,
       Prenom: input.first_name,
       Mail_professionnel: input.professional_email,
       Ecole: input.school,
       Date_Emprunt: input.loan_date,
-      Retour: returnDate,
       Jeu: Number(gameId),
     }}));
     const created = await gristRequest(env, env.GRIST_LOANS_TABLE || 'Emprunts', {

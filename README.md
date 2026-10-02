@@ -26,12 +26,13 @@ GRIST_API_KEY=ta-cle-api-grist
 GRIST_DOC_ID=iSya7D8N4oHCP1GrHQGzRB
 GRIST_BASE_URL=https://grist.numerique.gouv.fr
 GRIST_INVENTORY_TABLE=Inventaire_des_jeux
-GRIST_LOANS_TABLE=Emprunts
+GRIST_LOANS_TABLE=Table1
+GRIST_SCHOOLS_TABLE=Ecoles
 GRIST_ENABLED=true
 MANAGER_PASSWORD=mot-de-passe-gestionnaire
 ```
 
-Les secrets Grist et le mot de passe gestionnaire doivent etre saisis dans Cloudflare, jamais dans GitHub. Le mot de passe permet d’avancer la date de retour, d’imprimer une fiche d’emprunt et de supprimer une réservation.
+Les secrets Grist et le mot de passe gestionnaire doivent etre saisis dans Cloudflare, jamais dans GitHub. Le mot de passe permet d’avancer la date de retour, d’imprimer une fiche d’emprunt ou de retour et d’annuler une réservation dans le calendrier. Les changements de retour et annulations sont conservés dans le navigateur utilisé et ne sont pas synchronisés dans Grist. La table `Ecoles` fournit les choix du formulaire (par défaut, colonne `Ecole`, `École` ou `Nom`).
 
 ## Developpement local
 
@@ -66,6 +67,6 @@ Ne pas utiliser `npx wrangler deploy` : cette commande concerne les Workers clas
 
 Inventaire : `Jeu`, `Marque`, `Age_indique`, `Joueurs`, `Remarques`.
 
-Emprunts (`Table1`) : `Nom`, `Prenom`, `Mail_professionnel`, `Ecole`, `Date_Emprunt`, `Retour`, `Jeu`.
+Emprunts (`Table1`) : `Nom`, `Prenom`, `Mail_professionnel`, `Ecole`, `Date_Emprunt`, `Jeu`. La date de retour est calculée dans l’application (date d’emprunt + 20 jours) et n’est pas écrite dans Grist.
 
 Une reservation groupant plusieurs jeux cree une ligne Grist par jeu, pour la meme periode de 21 jours.

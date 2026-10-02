@@ -1,8 +1,7 @@
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 function gristUrl(env, table) {
-  const base = (env.GRIST_BASE_URL || 'https://grist.numerique.gouv.fr').replace(/\/$/, '');
-  const root = base.split('/api/docs/')[0].replace(/\/$/, '');
+  const root = new URL(env.GRIST_BASE_URL || 'https://grist.numerique.gouv.fr').origin;
   const tableId = table.replaceAll(' ', '_');
   return `${root}/api/docs/${env.GRIST_DOC_ID}/tables/${tableId}/records`;
 }
@@ -49,6 +48,7 @@ function normalizeGame(record) {
 function normalizeLoan(record) {
   const fields = record.fields || {};
   const loanDate = toDate(fields.Date_Emprunt ?? fields['Date Emprunt']);
+  const returnDate = fields.Retour == null || fields.Retour === '' ? addDays(loanDate, 20) : toDate(fields.Retour);
   return {
     id: record.id,
     name: fields.Nom || '',
@@ -57,7 +57,7 @@ function normalizeLoan(record) {
     school: fields.Ecole || '',
     loan_date: loanDate,
     game_id: Number(fields.Jeu),
-    return_date: addDays(loanDate, 20),
+    return_date: returnDate,
   };
 }
 
