@@ -46,6 +46,7 @@ export async function onRequestPost({ request, env }) {
     }));
 
     let emailSent = false;
+    let emailError = '';
     try {
       const gamesById = new Map();
       try {
@@ -66,10 +67,13 @@ export async function onRequestPost({ request, env }) {
       });
       emailSent = true;
     } catch (error) {
+      emailError = String(error.message || 'Erreur SMTP inconnue').slice(0, 200);
       console.error('Échec de l’envoi du courriel de confirmation :', error.message);
     }
 
-    return Response.json(loans, { status: 201, headers: { 'X-Email-Sent': String(emailSent) } });
+    const headers = { 'X-Email-Sent': String(emailSent) };
+    if (emailError) headers['X-Email-Error'] = encodeURIComponent(emailError);
+    return Response.json(loans, { status: 201, headers });
   } catch (error) {
     return Response.json({ detail: error.message }, { status: 503 });
   }
