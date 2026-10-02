@@ -21,10 +21,56 @@ function occupiedDates() { const selectedIds = new Set(state.selectedGames.map((
 function allBookings() { const grouped = new Map(); state.loans.forEach((loan) => { const key = [loan.name, loan.first_name, loan.professional_email, loan.school, loan.loan_date, loan.return_date, loan.game_id].join('\u001f'); if (!grouped.has(key)) grouped.set(key, { ...loan, ids: [], entries: [] }); const booking = grouped.get(key); booking.ids.push(loan.id); booking.entries.push(loan); }); return [...grouped.values()]; }
 function loansForDate(date) { const selectedIds = new Set(state.selectedGames.map((game) => game.id)); return allBookings().filter((booking) => booking.entries.some((loan) => selectedIds.has(loan.game_id) && loan.loan_date <= date && date <= (loan.occupied_until || loan.return_date))); }
 function renderCalendar() { const year = state.month.getFullYear(); const month = state.month.getMonth(); $('#calendar-month').textContent = new Intl.DateTimeFormat('fr-FR', { month: 'long', year: 'numeric' }).format(state.month); const firstDay = (new Date(year, month, 1).getDay() + 6) % 7; const daysInMonth = new Date(year, month + 1, 0).getDate(); const today = iso(new Date()); const busy = occupiedDates(); let html = ''; for (let index = 0; index < firstDay; index += 1) html += '<button class="day empty" tabindex="-1" aria-hidden="true"></button>'; for (let day = 1; day <= daysInMonth; day += 1) { const date = iso(new Date(year, month, day)); const occupied = busy.has(date); const unavailable = occupied || date < today; const classes = ['day', occupied ? 'occupied' : '', date < today ? 'past' : '', date === today ? 'today' : ''].filter(Boolean).join(' '); const disabled = unavailable && !state.manager; html += `<button class="${classes}" data-date="${date}" ${disabled ? 'disabled' : ''}>${day}</button>`; } $('#calendar-grid').innerHTML = html; document.querySelectorAll('#calendar-grid .day:not(.empty)').forEach((button) => button.addEventListener('click', () => { if (button.classList.contains('occupied')) openManageModal(button.dataset.date); else openModal(button.dataset.date); })); }
-function openModal(date) { $('#modal-title').textContent = state.selectedGames.map((item) => item.Jeu).join(' + '); $('#modal-date').textContent = formatDate(date); $('#loan-form').dataset.date = date; $('#loan-form').dataset.gameIds = JSON.stringify(state.selectedGames.map((item) => item.id)); $('#loan-form').reset(); $('#form-error').textContent = ''; $('#loan-modal').hidden = false; $('#loan-form').querySelector('input').focus(); }
+function openModal(date) {
+  const form = $('#loan-form');
+  const startInput = $('#loan-start-date');
+  const endInput = $('#loan-end-date');
+  $('#modal-title').textContent = state.selectedGames.map((item) => item.Jeu).join(' + ');
+  form.dataset.gameIds = JSON.stringify(state.selectedGames.map((item) => item.id));
+  form.reset();
+  startInput.value = date;
+  endInput.value = iso(new Date(new Date(`${date}T12:00:00`).getTime() + 20 * 86400000));
+  const updateDates = () => {
+    endInput.min = startInput.value;
+    if (!startInput.value || !endInput.value) {
+      $('#modal-date').textContent = 'Choisissez une période de réservation';
+      return;
+    }
+    if (endInput.value < startInput.value) endInput.value = startInput.value;
+    $('#modal-date').textContent = `Du ${formatDate(startInput.value)} au ${formatDate(endInput.value)}`;
+  };
+  startInput.onchange = updateDates;
+  endInput.onchange = updateDates;
+  updateDates();
+  $('#form-error').textContent = '';
+  $('#loan-modal').hidden = false;
+  form.querySelector('input[name="name"]').focus();
+}
 function closeModal() { $('#loan-modal').hidden = true; }
 function showToast(message) { const toast = $('#toast'); toast.textContent = message; toast.classList.add('show'); setTimeout(() => toast.classList.remove('show'), 3500); }
-async function submitLoan(event) { event.preventDefault(); const form = event.currentTarget; const data = Object.fromEntries(new FormData(form)); const gameIds = JSON.parse(form.dataset.gameIds); const loanDate = form.dataset.date; if (!confirm(`Confirmer la réservation de ${gameIds.length} jeu${gameIds.length > 1 ? 'x' : ''} pour le ${formatDate(loanDate)} ?`)) return; const printWindow = window.open('', '_blank'); const response = await fetch('/api/loans/batch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...data, loan_date: loanDate, game_ids: gameIds }) }); const result = await response.json(); if (!response.ok) { printWindow?.close(); $('#form-error').textContent = result.detail || 'La réservation n’a pas pu être enregistrée.'; return; } state.loans.push(...result); closeModal(); renderCalendar(); const returnDate = result[0]?.return_date || iso(new Date(new Date(`${loanDate}T12:00:00`).getTime() + 20 * 86400000)); if (printWindow) printSheet('Fiche d’emprunt', data, state.selectedGames, loanDate, returnDate, printWindow); showToast(printWindow ? 'Réservation enregistrée. La fiche est prête à imprimer en PDF.' : 'Réservation enregistrée; autorisez les fenêtres surgissantes pour imprimer la fiche.'); }
+async function submitLoan(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const data = Object.fromEntries(new FormData(form));
+  const gameIds = JSON.parse(form.dataset.gameIds);
+  const loanDate = data.loan_date;
+  const endDate = data.end_date;
+  if (!confirm(`Confirmer la réservation de ${gameIds.length} jeu${gameIds.length > 1 ? 'x' : ''} du ${formatDate(loanDate)} au ${formatDate(endDate)} ?`)) return;
+  const printWindow = window.open('', '_blank');
+  const response = await fetch('/api/loans/batch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...data, game_ids: gameIds }) });
+  const result = await response.json();
+  if (!response.ok) {
+    printWindow?.close();
+    $('#form-error').textContent = result.detail || 'La réservation n’a pas pu être enregistrée.';
+    return;
+  }
+  state.loans.push(...result);
+  closeModal();
+  renderCalendar();
+  const returnDate = result[0]?.return_date || endDate;
+  if (printWindow) printSheet('Fiche d’emprunt', data, state.selectedGames, loanDate, returnDate, printWindow);
+  showToast(printWindow ? 'Réservation enregistrée. La fiche est prête à imprimer en PDF.' : 'Réservation enregistrée; autorisez les fenêtres surgissantes pour imprimer la fiche.');
+}
 async function loginManager(event) { event.preventDefault(); const form = event.currentTarget; const response = await fetch('/api/manager/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: form.password.value }) }); const result = await response.json(); if (!response.ok) { $('#manager-error').textContent = result.detail || 'Connexion impossible.'; return; } state.manager = true; form.reset(); $('#manager-modal').hidden = true; $('#manager-button').textContent = 'Gestionnaire connecté'; if (state.selectedGames.length) renderCalendar(); showToast('Mode gestionnaire activé.'); }
 function openManagerModal() { $('#manager-error').textContent = ''; $('#manager-modal').hidden = false; $('#manager-password').focus(); }
 function closeManagerModal() { $('#manager-modal').hidden = true; }

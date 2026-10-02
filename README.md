@@ -67,6 +67,6 @@ Ne pas utiliser `npx wrangler deploy` : cette commande concerne les Workers clas
 
 Inventaire : `Jeu`, `Marque`, `Age_indique`, `Joueurs`, `Remarques`.
 
-Emprunts (`Table1`) : `Nom`, `Prenom`, `Mail_professionnel`, `Ecole`, `Date_Emprunt`, `Jeu`, `Retour`, `Date_Annulation`. Ajouter `Retour` et `Date_Annulation` comme colonnes de type Date dans Grist. La date de retour prévue reste calculée dans l’application (date d’emprunt + 20 jours); les retours anticipés et les annulations sont enregistrés dans ces colonnes.
+Emprunts (`Table1`) : `Nom`, `Prenom`, `Mail_professionnel`, `Ecole`, `Date_Emprunt`, `Date_Fin`, `Jeu`, `Retour`, `Date_Annulation`. Ajouter `Date_Fin`, `Retour` et `Date_Annulation` comme colonnes de type Date dans Grist. Les dates de début et de fin prévues sont choisies dans le formulaire; les retours anticipés et les annulations sont enregistrés dans leurs colonnes respectives. Pour les anciennes lignes sans `Date_Fin`, l’application conserve la fin historique à 20 jours après le début.
 
-Une reservation groupant plusieurs jeux cree une ligne Grist par jeu, pour la meme periode de 21 jours.
+Une reservation groupant plusieurs jeux cree une ligne Grist par jeu, pour la meme periode.

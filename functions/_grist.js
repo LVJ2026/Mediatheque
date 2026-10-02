@@ -50,7 +50,8 @@ function normalizeLoan(record) {
   const loanDate = toDate(fields.Date_Emprunt ?? fields['Date Emprunt']);
   const actualReturnDate = fields.Retour == null || fields.Retour === '' ? null : toDate(fields.Retour);
   const cancelledDate = fields.Date_Annulation == null || fields.Date_Annulation === '' ? null : toDate(fields.Date_Annulation);
-  const returnDate = cancelledDate || actualReturnDate || addDays(loanDate, 20);
+  const plannedEndDate = fields.Date_Fin == null || fields.Date_Fin === '' ? addDays(loanDate, 20) : toDate(fields.Date_Fin);
+  const returnDate = cancelledDate || actualReturnDate || plannedEndDate;
   const occupiedUntil = cancelledDate || actualReturnDate ? addDays(returnDate, -1) : returnDate;
   return {
     id: record.id,
