@@ -15,7 +15,13 @@ export async function onRequestPost({ request, env }) {
     }
 
     const loansPayload = await gristRequest(env, env.GRIST_LOANS_TABLE || 'Emprunts');
-    const existing = (loansPayload.records || []).map(normalizeLoan);
+    const existing = (loansPayload.records || [])
+      .filter((record) => {
+        const fields = record.fields || {};
+        const loanDate = fields.Date_Emprunt ?? fields['Date Emprunt'];
+        return fields.Jeu != null && loanDate != null && loanDate !== '';
+      })
+      .map(normalizeLoan);
     const requestedEnd = input.end_date;
     const conflict = input.game_ids.some((gameId) => existing.some((loan) => loan.game_id === Number(gameId) && input.loan_date <= (loan.occupied_until || loan.return_date) && requestedEnd >= loan.loan_date));
     if (conflict) return Response.json({ detail: 'Au moins un jeu est déjà réservé sur cette période.' }, { status: 409 });
