@@ -1,0 +1,14 @@
+name = "mediatheque-rappels-emprunts"
+main = "./reminders.js"
+compatibility_date = "2026-09-17"
+
+[triggers]
+crons = ["0 8 * * *"]
+
+[vars]
+GRIST_ENABLED = "true"
+GRIST_BASE_URL = "https://grist.numerique.gouv.fr"
+GRIST_INVENTORY_TABLE = "Inventaire_des_jeux"
+GRIST_LOANS_TABLE = "Table1"
+SMTP_HOST = "smtps.ac-nancy-metz.fr"
+SMTP_PORT = "465"

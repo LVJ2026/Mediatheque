@@ -63,10 +63,16 @@ npx wrangler pages deploy public --project-name mediatheque-reservations
 
 Ne pas utiliser `npx wrangler deploy` : cette commande concerne les Workers classiques et produit une erreur dans un projet Pages. Pour un deploiement Git Cloudflare Pages, utiliser `npm run build` comme commande de build ; Cloudflare publie ensuite `public/`.
 
+## Rappels de retour
+
+Le Worker `mediatheque-rappels-emprunts` s'exécute chaque jour à 08:00 UTC (09:00 en hiver, 10:00 en été, heure de Paris) et envoie un rappel trois jours avant la fin prévue. Il groupe les jeux d'un même emprunteur et d'une même période. Après un envoi réussi, il enregistre la date dans `Rappel_Envoye` pour éviter les doublons. Ajouter cette colonne comme colonne Date à la table des emprunts.
+
+Les secrets du Worker de rappels sont distincts de ceux de Pages. Depuis `worker/`, les créer avec `npx wrangler secret put` pour chacun de ces noms : `GRIST_API_KEY`, `GRIST_DOC_ID`, `SMTP_USER`, `SMTP_PASSWORD` et `SMTP_FROM`. Déployer ensuite avec `npm run deploy:reminders`. Les paramètres non secrets (tables et serveur SMTP) sont dans `wrangler.reminders.toml`.
+
 ## Colonnes Grist attendues
 
 Inventaire : `Jeu`, `Marque`, `Age_indique`, `Joueurs`, `Remarques`.
 
-Emprunts (`Table1`) : `Nom`, `Prenom`, `Mail_professionnel`, `Ecole`, `Date_Emprunt`, `Date_Fin`, `Jeu`, `Retour`, `Date_Annulation`. Ajouter `Date_Fin`, `Retour` et `Date_Annulation` comme colonnes de type Date dans Grist. Les dates de début et de fin prévues sont choisies dans le formulaire; les retours anticipés et les annulations sont enregistrés dans leurs colonnes respectives. Pour les anciennes lignes sans `Date_Fin`, l’application conserve la fin historique à 20 jours après le début.
+Emprunts (`Table1`) : `Nom`, `Prenom`, `Mail_professionnel`, `Ecole`, `Date_Emprunt`, `Date_Fin`, `Jeu`, `Retour`, `Date_Annulation`, `Rappel_Envoye`. Ajouter `Date_Fin`, `Retour`, `Date_Annulation` et `Rappel_Envoye` comme colonnes de type Date dans Grist. Les dates de début et de fin prévues sont choisies dans le formulaire; les retours anticipés et les annulations sont enregistrés dans leurs colonnes respectives. Pour les anciennes lignes sans `Date_Fin`, l’application conserve la fin historique à 20 jours après le début.
 
 Une reservation groupant plusieurs jeux cree une ligne Grist par jeu, pour la meme periode.
