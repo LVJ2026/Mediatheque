@@ -42,13 +42,15 @@ async function loadBookStock(env) {
   const totals = new Map((inventory.records || []).map((record) => [
     Number(record.id), Number(record.fields?.Quantite ?? record.fields?.['Quantité'] ?? 0),
   ]));
+  const borrowed = new Map([...totals.keys()].map((id) => [id, 0]));
   for (const record of loans.records || []) {
     const fields = record.fields || {};
     if (!isActiveBookLoan(fields)) continue;
     const id = Number(bookId(fields, inventory.records || []));
-    if (totals.has(id)) totals.set(id, totals.get(id) + bookQuantity(fields));
+    if (borrowed.has(id)) borrowed.set(id, borrowed.get(id) + bookQuantity(fields));
   }
-  return { inventory, loans, totals };
+  const available = new Map([...totals].map(([id, quantity]) => [id, Math.max(0, quantity - borrowed.get(id))]));
+  return { inventory, loans, totals, available };
 }
 
 async function syncBookAvailability(env, totalQuantities) {
@@ -68,7 +70,7 @@ async function syncBookAvailability(env, totalQuantities) {
     .filter((record) => totalQuantities.has(Number(record.id)))
     .map((record) => ({
       id: record.id,
-      fields: { Quantite: totalQuantities.get(Number(record.id)) - reserved.get(Number(record.id)) },
+      fields: { Qte_empruntee: Math.max(0, totalQuantities.get(Number(record.id)) - reserved.get(Number(record.id))) },
     }));
   if (records.length) {
     await gristRequest(env, booksTable(env), {

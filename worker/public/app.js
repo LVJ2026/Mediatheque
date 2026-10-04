@@ -122,20 +122,24 @@ function clearBookSelection() {
   $('#series-calendar-content').hidden = true;
 }
 function occupiedDates() { const selectedIds = new Set(state.selectedGames.map((game) => game.id)); const days = new Set(); state.loans.filter((loan) => selectedIds.has(loan.game_id)).forEach((loan) => { const day = new Date(`${loan.loan_date}T12:00:00`); const end = new Date(`${loan.occupied_until || loan.return_date}T12:00:00`); while (day <= end) { days.add(iso(day)); day.setDate(day.getDate() + 1); } }); return days; }
-function seriesOccupiedDates() {
-  const days = new Set();
+function seriesAvailability() {
+  const days = new Map();
   const year = state.month.getFullYear();
   const month = state.month.getMonth();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   for (let day = 1; day <= daysInMonth; day += 1) {
     const date = iso(new Date(year, month, day));
-    const unavailable = state.selectedBooks.some((book) => {
+    let fullyReserved = false;
+    let partiallyReserved = false;
+    for (const book of state.selectedBooks) {
       const reserved = state.bookLoans
         .filter((loan) => loan.book_id === book.id && loan.loan_date <= date && date <= (loan.occupied_until || loan.return_date))
         .reduce((total, loan) => total + loan.quantity, 0);
-      return reserved + book.requested_quantity > book.quantity;
-    });
-    if (unavailable) days.add(date);
+      const remaining = Math.max(0, book.quantity - reserved);
+      fullyReserved ||= remaining === 0;
+      partiallyReserved ||= reserved > 0;
+    }
+    days.set(date, fullyReserved ? 'full' : partiallyReserved ? 'partial' : 'available');
   }
   return days;
 }
@@ -149,14 +153,15 @@ function renderSeriesCalendar() {
   const firstDay = (new Date(year, month, 1).getDay() + 6) % 7;
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const today = iso(new Date());
-  const busy = seriesOccupiedDates();
+  const availability = seriesAvailability();
   let html = '';
   for (let index = 0; index < firstDay; index += 1) html += '<button class="day empty" tabindex="-1" aria-hidden="true"></button>';
   for (let day = 1; day <= daysInMonth; day += 1) {
     const date = iso(new Date(year, month, day));
-    const occupied = busy.has(date);
+    const status = availability.get(date);
+    const occupied = status === 'full';
     const unavailable = occupied || date < today;
-    const classes = ['day', occupied ? 'occupied' : '', date < today ? 'past' : '', date === today ? 'today' : ''].filter(Boolean).join(' ');
+    const classes = ['day', occupied ? 'occupied' : '', status === 'partial' ? 'partial' : '', date < today ? 'past' : '', date === today ? 'today' : ''].filter(Boolean).join(' ');
     const disabled = unavailable && !state.manager;
     html += `<button class="${classes}" data-date="${date}" ${disabled ? 'disabled' : ''}>${day}</button>`;
   }
