@@ -17,7 +17,10 @@ async function loadGames() {
   document.querySelectorAll('#games-body tr').forEach((row) => { row.addEventListener('click', () => toggleGame(Number(row.dataset.gameId))); const checkbox = row.querySelector('input'); checkbox.addEventListener('click', (event) => event.stopPropagation()); checkbox.addEventListener('change', () => toggleGame(Number(row.dataset.gameId))); });
 }
 async function loadBooks() {
-  const [booksResponse, loansResponse] = await Promise.all([fetch('/api/books'), fetch('/api/book-loans')]);
+  const [booksResponse, loansResponse] = await Promise.all([
+    fetch('/api/books', { cache: 'no-store' }),
+    fetch('/api/book-loans', { cache: 'no-store' }),
+  ]);
   if (!booksResponse.ok || !loansResponse.ok) throw new Error('Impossible de charger l’inventaire des livres et albums.');
   state.books = await booksResponse.json();
   state.bookLoans = await loansResponse.json();
