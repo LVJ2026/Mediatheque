@@ -367,12 +367,15 @@ function closeManagerModal() { $('#manager-modal').hidden = true; }
 async function logoutManager() {
   showToast('Déconnexion en cours…');
   state.manager = false;
-  clearGameSelection();
-  clearBookSelection();
+  syncManagerButtons();
+  $('#home-view').hidden = false;
+  $('#games-view').hidden = true;
+  $('#series-view').hidden = true;
+  if (location.hash !== '#home') location.hash = '#home';
+  try { clearGameSelection(); } catch (error) { console.error('Nettoyage de la sélection des jeux impossible :', error); }
+  try { clearBookSelection(); } catch (error) { console.error('Nettoyage de la sélection des séries impossible :', error); }
   closeManageModal();
   closeManagerModal();
-  syncManagerButtons();
-  location.hash = '#home';
   try {
     const response = await fetch('/api/manager/logout', { method: 'POST', cache: 'no-store', credentials: 'same-origin' });
     const result = await response.json().catch(() => ({}));
