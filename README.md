@@ -27,6 +27,7 @@ GRIST_DOC_ID=iSya7D8N4oHCP1GrHQGzRB
 GRIST_BASE_URL=https://grist.numerique.gouv.fr
 GRIST_INVENTORY_TABLE=Inventaire_des_jeux
 GRIST_BOOKS_INVENTORY_TABLE=Inventaire livres albums
+GRIST_BOOKS_LOANS_TABLE=Emprunts livres albums
 GRIST_LOANS_TABLE=Table1
 GRIST_SCHOOLS_TABLE=Ecoles
 GRIST_ENABLED=true
@@ -74,8 +75,12 @@ Les secrets du Worker de rappels sont distincts de ceux de Pages. Depuis `worker
 
 Inventaire : `Jeu`, `Marque`, `Age_indique`, `Joueurs`, `Remarques`.
 
-Emprunts (`Table1`) : `Nom`, `Prenom`, `Mail_professionnel`, `Ecole`, `Date_Emprunt`, `Date_Fin`, `Jeu`, `Livre_album`, `Quantite_demandee`, `Retour`, `Date_Annulation`, `Rappel_Envoye` et `Confirmation_Envoyee`. `Livre_album` doit être une référence vers l’inventaire livres/albums; `Quantite_demandee` est un nombre entier. Ajouter les dates et marqueurs d’envoi comme colonnes de type Date. Une fiche avec plusieurs ressources crée une ligne par jeu ou série, liée au même emprunteur et à la même période.
+Emprunts jeux (`Table1`) : `Nom`, `Prenom`, `Mail_professionnel`, `Ecole`, `Date_Emprunt`, `Date_Fin`, `Jeu`, `Retour`, `Date_Annulation` et `Rappel_Envoye`.
 
-Inventaire livres/albums (`Inventaire livres albums`) : `Titre`, `Auteur`, `Lieu`, `Quantite` et `Quantite_reservee`. `Quantite` est le stock total; `Quantite_reservee` est un nombre entier mis à jour par l’application à chaque réservation, retour ou annulation. La disponibilité du calendrier est calculée à partir du stock total et des réservations qui chevauchent les dates demandées. La collection « Séries de livres / albums » envoie la confirmation le jour de l’emprunt et un rappel trois jours avant la date de retour.
+Emprunts livres/albums (`Emprunts livres albums`) : ajouter les colonnes emprunteur/dates `Nom`, `Prenom`, `Mail_professionnel`, `Ecole`, `Date_Emprunt`, `Date_Fin`, `Retour`, `Date_Annulation`, `Rappel_Envoye` et `Confirmation_Envoyee`, en plus de `Titre`, `Auteur`, `Lieu` et `Quantite`. La quantité de la ligne est celle demandée pour cette série.
+
+Inventaire livres/albums (`Inventaire livres albums`) : `Titre`, `Auteur`, `Lieu` et `Quantite`. `Quantite` représente le disponible et est décrémentée à la réservation puis restaurée au retour ou à l’annulation. Le total de stock est reconstitué à partir des réservations actives pour vérifier les chevauchements de dates. Une réservation de plusieurs séries crée une ligne par série, avec le même emprunteur et la même période. Les marqueurs `Rappel_Envoye` et `Confirmation_Envoyee` évitent les courriels en double; ajoutez-les comme colonnes Date dans la table des emprunts livres/albums.
+
+Les rappels de retour des jeux lisent `Table1`; les confirmations du jour d’emprunt et les rappels à trois jours des livres/albums lisent `Emprunts livres albums`.
 
 Une reservation groupant plusieurs jeux cree une ligne Grist par jeu, pour la meme periode.

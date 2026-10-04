@@ -52,13 +52,14 @@ function normalizeGame(record) {
 
 function normalizeBook(record) {
   const fields = record.fields || {};
+  const quantity = Number(fields.Quantite ?? fields['Quantité'] ?? 0);
   return {
     id: record.id,
     Titre: fields.Titre || '',
     Auteur: fields.Auteur ?? '',
     Lieu: fields.Lieu ?? '',
-    quantity: Number(fields.Quantite ?? fields['Quantité'] ?? 0),
-    reserved_quantity: Number(fields.Quantite_reservee ?? fields['Quantité réservée'] ?? 0),
+    quantity,
+    available_quantity: quantity,
   };
 }
 
@@ -84,14 +85,22 @@ function normalizeLoan(record) {
   };
 }
 
-function normalizeBookLoan(record) {
+function normalizeBookLoan(record, inventoryRecords = []) {
   const fields = record.fields || {};
-  const reference = fields.Livre_album ?? fields.Livre_Album;
+  const key = [fields.Titre, fields.Auteur, fields.Lieu].map((value) => String(value ?? '').trim()).join('\u001f');
+  const book = inventoryRecords.find((item) => {
+    const bookFields = item.fields || {};
+    return [bookFields.Titre, bookFields.Auteur, bookFields.Lieu]
+      .map((value) => String(value ?? '').trim()).join('\u001f') === key;
+  });
   return {
     ...normalizeLoan(record),
     game_id: null,
-    book_id: Number(Array.isArray(reference) ? reference[1] : reference),
-    quantity: Number(fields.Quantite_demandee ?? fields['Quantité demandée'] ?? 1),
+    book_id: Number(book?.id),
+    quantity: Number(fields.Quantite ?? fields['Quantité'] ?? 1),
+    Titre: fields.Titre || '',
+    Auteur: fields.Auteur ?? '',
+    Lieu: fields.Lieu ?? '',
     collection: 'books',
   };
 }

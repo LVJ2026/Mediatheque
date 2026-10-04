@@ -3,6 +3,7 @@ GRIST_DOC_ID=replace-with-your-document-id
 GRIST_BASE_URL=https://grist.numerique.gouv.fr
 GRIST_INVENTORY_TABLE=Inventaire_des_jeux
 GRIST_BOOKS_INVENTORY_TABLE=Inventaire livres albums
+GRIST_BOOKS_LOANS_TABLE=Emprunts livres albums
 GRIST_LOANS_TABLE=Table1
 GRIST_ENABLED=true
 MANAGER_PASSWORD=changez-ce-mot-de-passe

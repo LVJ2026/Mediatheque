@@ -1,5 +1,5 @@
 import { assertConfigured, gristRequest, normalizeBookLoan, normalizeLoan } from './functions/_grist.js';
-import { booksTable, isActiveBookLoan } from './functions/_books.js';
+import { bookLoansTable, booksTable, isActiveBookLoan } from './functions/_books.js';
 import { sendMail } from './functions/_mail.js';
 
 const TIME_ZONE = 'Europe/Paris';
@@ -48,30 +48,17 @@ async function sendReminders(env, now) {
   const today = dateInParis(now);
   const reminderDate = addDays(today, 3);
   const table = env.GRIST_LOANS_TABLE || 'Emprunts';
-  const payload = await gristRequest(env, table);
+  const [payload, bookInventory, bookPayload] = await Promise.all([
+    gristRequest(env, table),
+    gristRequest(env, booksTable(env)),
+    gristRequest(env, bookLoansTable(env)),
+  ]);
   const groups = new Map();
   const bookStarts = new Map();
   const bookReturns = new Map();
 
   for (const record of payload.records || []) {
     const fields = record.fields || {};
-    if (isActiveBookLoan(fields)) {
-      const loan = normalizeBookLoan(record);
-      const key = reminderKey(loan);
-      if (loan.loan_date === today && !hasDate(fields.Confirmation_Envoyee)) {
-        if (!bookStarts.has(key)) bookStarts.set(key, { borrower: loan, records: [], quantities: new Map() });
-        const group = bookStarts.get(key);
-        group.records.push(record);
-        group.quantities.set(loan.book_id, (group.quantities.get(loan.book_id) || 0) + loan.quantity);
-      }
-      if (loan.return_date === reminderDate && !hasDate(fields.Rappel_Envoye)) {
-        if (!bookReturns.has(key)) bookReturns.set(key, { borrower: loan, records: [], quantities: new Map() });
-        const group = bookReturns.get(key);
-        group.records.push(record);
-        group.quantities.set(loan.book_id, (group.quantities.get(loan.book_id) || 0) + loan.quantity);
-      }
-      continue;
-    }
     const loanDate = fields.Date_Emprunt ?? fields['Date Emprunt'];
     if (fields.Jeu == null || !hasDate(loanDate)) continue;
     if (hasDate(fields.Retour) || hasDate(fields.Date_Annulation)) continue;
@@ -92,6 +79,25 @@ async function sendReminders(env, now) {
     group.records.push(record);
     group.gameIds.add(loan.game_id);
     group.alreadySent ||= hasDate(fields.Rappel_Envoye);
+  }
+
+  for (const record of bookPayload.records || []) {
+    const fields = record.fields || {};
+    if (!isActiveBookLoan(fields)) continue;
+    const loan = normalizeBookLoan(record, bookInventory.records || []);
+    const key = reminderKey(loan);
+    if (loan.loan_date === today && !hasDate(fields.Confirmation_Envoyee)) {
+      if (!bookStarts.has(key)) bookStarts.set(key, { borrower: loan, records: [], quantities: new Map() });
+      const group = bookStarts.get(key);
+      group.records.push(record);
+      group.quantities.set(loan.book_id, (group.quantities.get(loan.book_id) || 0) + loan.quantity);
+    }
+    if (loan.return_date === reminderDate && !hasDate(fields.Rappel_Envoye)) {
+      if (!bookReturns.has(key)) bookReturns.set(key, { borrower: loan, records: [], quantities: new Map() });
+      const group = bookReturns.get(key);
+      group.records.push(record);
+      group.quantities.set(loan.book_id, (group.quantities.get(loan.book_id) || 0) + loan.quantity);
+    }
   }
 
   const dueGroups = [...groups.values()].filter((group) => !group.alreadySent);
@@ -136,13 +142,8 @@ async function sendReminders(env, now) {
 
   if (dueBookGroups.length) {
     const booksById = new Map();
-    try {
-      const inventory = await gristRequest(env, booksTable(env));
-      for (const record of inventory.records || []) {
-        booksById.set(Number(record.id), record.fields?.Titre || `Série ${record.id}`);
-      }
-    } catch (error) {
-      console.error('Titres des séries indisponibles pour les courriels :', error.message);
+    for (const record of bookInventory.records || []) {
+      booksById.set(Number(record.id), record.fields?.Titre || `Série ${record.id}`);
     }
 
     for (const group of dueBookGroups) {
@@ -158,7 +159,7 @@ async function sendReminders(env, now) {
             : `Bonjour ${loan.first_name} ${loan.name},\n\nNous vous rappelons que le retour prévu pour :\n${bookList}\nest le ${formatDate(loan.return_date)}.\n\nMédiathèque`,
         });
         const marker = isStart ? { Confirmation_Envoyee: today } : { Rappel_Envoye: today };
-        await gristRequest(env, table, {
+        await gristRequest(env, bookLoansTable(env), {
           method: 'PATCH',
           body: JSON.stringify({ records: group.records.map((record) => ({ id: record.id, fields: marker })) }),
         });
