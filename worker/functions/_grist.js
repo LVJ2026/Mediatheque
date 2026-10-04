@@ -50,6 +50,18 @@ function normalizeGame(record) {
   };
 }
 
+function normalizeBook(record) {
+  const fields = record.fields || {};
+  return {
+    id: record.id,
+    Titre: fields.Titre || '',
+    Auteur: fields.Auteur ?? '',
+    Lieu: fields.Lieu ?? '',
+    quantity: Number(fields.Quantite ?? fields['Quantité'] ?? 0),
+    reserved_quantity: Number(fields.Quantite_reservee ?? fields['Quantité réservée'] ?? 0),
+  };
+}
+
 function normalizeLoan(record) {
   const fields = record.fields || {};
   const loanDate = toDate(fields.Date_Emprunt ?? fields['Date Emprunt']);
@@ -72,4 +84,16 @@ function normalizeLoan(record) {
   };
 }
 
-export { addDays, assertConfigured, gristRequest, normalizeGame, normalizeLoan };
+function normalizeBookLoan(record) {
+  const fields = record.fields || {};
+  const reference = fields.Livre_album ?? fields.Livre_Album;
+  return {
+    ...normalizeLoan(record),
+    game_id: null,
+    book_id: Number(Array.isArray(reference) ? reference[1] : reference),
+    quantity: Number(fields.Quantite_demandee ?? fields['Quantité demandée'] ?? 1),
+    collection: 'books',
+  };
+}
+
+export { addDays, assertConfigured, gristRequest, normalizeBook, normalizeBookLoan, normalizeGame, normalizeLoan };

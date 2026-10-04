@@ -9,6 +9,7 @@ crons = ["0 8 * * *"]
 GRIST_ENABLED = "true"
 GRIST_BASE_URL = "https://grist.numerique.gouv.fr"
 GRIST_INVENTORY_TABLE = "Inventaire_des_jeux"
+GRIST_BOOKS_INVENTORY_TABLE = "Inventaire livres albums"
 GRIST_LOANS_TABLE = "Table1"
 SMTP_HOST = "smtps.ac-nancy-metz.fr"
 SMTP_PORT = "465"

@@ -26,6 +26,7 @@ GRIST_API_KEY=ta-cle-api-grist
 GRIST_DOC_ID=iSya7D8N4oHCP1GrHQGzRB
 GRIST_BASE_URL=https://grist.numerique.gouv.fr
 GRIST_INVENTORY_TABLE=Inventaire_des_jeux
+GRIST_BOOKS_INVENTORY_TABLE=Inventaire livres albums
 GRIST_LOANS_TABLE=Table1
 GRIST_SCHOOLS_TABLE=Ecoles
 GRIST_ENABLED=true
@@ -73,6 +74,8 @@ Les secrets du Worker de rappels sont distincts de ceux de Pages. Depuis `worker
 
 Inventaire : `Jeu`, `Marque`, `Age_indique`, `Joueurs`, `Remarques`.
 
-Emprunts (`Table1`) : `Nom`, `Prenom`, `Mail_professionnel`, `Ecole`, `Date_Emprunt`, `Date_Fin`, `Jeu`, `Retour`, `Date_Annulation`, `Rappel_Envoye`. Ajouter `Date_Fin`, `Retour`, `Date_Annulation` et `Rappel_Envoye` comme colonnes de type Date dans Grist. Les dates de début et de fin prévues sont choisies dans le formulaire; les retours anticipés et les annulations sont enregistrés dans leurs colonnes respectives. Pour les anciennes lignes sans `Date_Fin`, l’application conserve la fin historique à 20 jours après le début.
+Emprunts (`Table1`) : `Nom`, `Prenom`, `Mail_professionnel`, `Ecole`, `Date_Emprunt`, `Date_Fin`, `Jeu`, `Livre_album`, `Quantite_demandee`, `Retour`, `Date_Annulation`, `Rappel_Envoye` et `Confirmation_Envoyee`. `Livre_album` doit être une référence vers l’inventaire livres/albums; `Quantite_demandee` est un nombre entier. Ajouter les dates et marqueurs d’envoi comme colonnes de type Date. Une fiche avec plusieurs ressources crée une ligne par jeu ou série, liée au même emprunteur et à la même période.
+
+Inventaire livres/albums (`Inventaire livres albums`) : `Titre`, `Auteur`, `Lieu`, `Quantite` et `Quantite_reservee`. `Quantite` est le stock total; `Quantite_reservee` est un nombre entier mis à jour par l’application à chaque réservation, retour ou annulation. La disponibilité du calendrier est calculée à partir du stock total et des réservations qui chevauchent les dates demandées. La collection « Séries de livres / albums » envoie la confirmation le jour de l’emprunt et un rappel trois jours avant la date de retour.
 
 Une reservation groupant plusieurs jeux cree une ligne Grist par jeu, pour la meme periode.

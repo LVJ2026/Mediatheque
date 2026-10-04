@@ -1,4 +1,5 @@
-import { assertConfigured, gristRequest, normalizeLoan } from './functions/_grist.js';
+import { assertConfigured, gristRequest, normalizeBookLoan, normalizeLoan } from './functions/_grist.js';
+import { booksTable, isActiveBookLoan } from './functions/_books.js';
 import { sendMail } from './functions/_mail.js';
 
 const TIME_ZONE = 'Europe/Paris';
@@ -49,9 +50,28 @@ async function sendReminders(env, now) {
   const table = env.GRIST_LOANS_TABLE || 'Emprunts';
   const payload = await gristRequest(env, table);
   const groups = new Map();
+  const bookStarts = new Map();
+  const bookReturns = new Map();
 
   for (const record of payload.records || []) {
     const fields = record.fields || {};
+    if (isActiveBookLoan(fields)) {
+      const loan = normalizeBookLoan(record);
+      const key = reminderKey(loan);
+      if (loan.loan_date === today && !hasDate(fields.Confirmation_Envoyee)) {
+        if (!bookStarts.has(key)) bookStarts.set(key, { borrower: loan, records: [], quantities: new Map() });
+        const group = bookStarts.get(key);
+        group.records.push(record);
+        group.quantities.set(loan.book_id, (group.quantities.get(loan.book_id) || 0) + loan.quantity);
+      }
+      if (loan.return_date === reminderDate && !hasDate(fields.Rappel_Envoye)) {
+        if (!bookReturns.has(key)) bookReturns.set(key, { borrower: loan, records: [], quantities: new Map() });
+        const group = bookReturns.get(key);
+        group.records.push(record);
+        group.quantities.set(loan.book_id, (group.quantities.get(loan.book_id) || 0) + loan.quantity);
+      }
+      continue;
+    }
     const loanDate = fields.Date_Emprunt ?? fields['Date Emprunt'];
     if (fields.Jeu == null || !hasDate(loanDate)) continue;
     if (hasDate(fields.Retour) || hasDate(fields.Date_Annulation)) continue;
@@ -75,7 +95,9 @@ async function sendReminders(env, now) {
   }
 
   const dueGroups = [...groups.values()].filter((group) => !group.alreadySent);
-  if (!dueGroups.length) return;
+  const dueBookGroups = [...bookStarts.values()].map((group) => ({ ...group, notice: 'start' }))
+    .concat([...bookReturns.values()].map((group) => ({ ...group, notice: 'return' })));
+  if (!dueGroups.length && !dueBookGroups.length) return;
 
   const gamesById = new Map();
   try {
@@ -109,6 +131,41 @@ async function sendReminders(env, now) {
       console.log(`Rappel envoyé pour ${loan.professional_email} (${loan.return_date}).`);
     } catch (error) {
       console.error(`Échec du rappel pour ${loan.professional_email} :`, error.message);
+    }
+  }
+
+  if (dueBookGroups.length) {
+    const booksById = new Map();
+    try {
+      const inventory = await gristRequest(env, booksTable(env));
+      for (const record of inventory.records || []) {
+        booksById.set(Number(record.id), record.fields?.Titre || `Série ${record.id}`);
+      }
+    } catch (error) {
+      console.error('Titres des séries indisponibles pour les courriels :', error.message);
+    }
+
+    for (const group of dueBookGroups) {
+      const loan = group.borrower;
+      const bookList = [...group.quantities].map(([id, quantity]) => `- ${booksById.get(id) || `Série ${id}`} × ${quantity}`).join('\n');
+      const isStart = group.notice === 'start';
+      try {
+        await sendMail(env, {
+          to: loan.professional_email,
+          subject: isStart ? 'Confirmation de votre emprunt de livres et albums' : 'Rappel : retour de vos séries dans 3 jours',
+          text: isStart
+            ? `Bonjour ${loan.first_name} ${loan.name},\n\nVotre emprunt commence aujourd’hui pour :\n${bookList}\n\nLe retour est prévu le ${formatDate(loan.return_date)}.\n\nMédiathèque`
+            : `Bonjour ${loan.first_name} ${loan.name},\n\nNous vous rappelons que le retour prévu pour :\n${bookList}\nest le ${formatDate(loan.return_date)}.\n\nMédiathèque`,
+        });
+        const marker = isStart ? { Confirmation_Envoyee: today } : { Rappel_Envoye: today };
+        await gristRequest(env, table, {
+          method: 'PATCH',
+          body: JSON.stringify({ records: group.records.map((record) => ({ id: record.id, fields: marker })) }),
+        });
+        console.log(`${isStart ? 'Confirmation' : 'Rappel'} envoyé pour ${loan.professional_email} (${loan.return_date}).`);
+      } catch (error) {
+        console.error(`Échec du courriel pour ${loan.professional_email} :`, error.message);
+      }
     }
   }
 }
