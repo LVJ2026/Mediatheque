@@ -87,20 +87,23 @@ function normalizeLoan(record) {
 
 function normalizeBookLoan(record, inventoryRecords = []) {
   const fields = record.fields || {};
+  const referenceId = Number(fields.Titre);
+  const referencedBook = inventoryRecords.find((item) => Number(item.id) === referenceId);
   const key = [fields.Titre, fields.Auteur, fields.Lieu].map((value) => String(value ?? '').trim()).join('\u001f');
-  const book = inventoryRecords.find((item) => {
+  const book = referencedBook || inventoryRecords.find((item) => {
     const bookFields = item.fields || {};
     return [bookFields.Titre, bookFields.Auteur, bookFields.Lieu]
       .map((value) => String(value ?? '').trim()).join('\u001f') === key;
   });
+  const bookFields = book?.fields || {};
   return {
     ...normalizeLoan(record),
     game_id: null,
     book_id: Number(book?.id),
     quantity: Number(fields.Quantite ?? fields['Quantité'] ?? 1),
-    Titre: fields.Titre || '',
-    Auteur: fields.Auteur ?? '',
-    Lieu: fields.Lieu ?? '',
+    Titre: bookFields.Titre ?? (typeof fields.Titre === 'string' ? fields.Titre : ''),
+    Auteur: bookFields.Auteur ?? (typeof fields.Auteur === 'string' ? fields.Auteur : ''),
+    Lieu: bookFields.Lieu ?? (typeof fields.Lieu === 'string' ? fields.Lieu : ''),
     is_active: (fields.Retour == null || fields.Retour === '')
       && (fields.Date_Annulation == null || fields.Date_Annulation === ''),
     collection: 'books',

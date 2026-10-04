@@ -13,10 +13,10 @@ function dateInParis(date) {
   return `${values.year}-${values.month}-${values.day}`;
 }
 
-async function sendReservationConfirmation(env, input, records, created) {
+async function sendReservationConfirmation(env, input, records, created, inventory) {
   try {
     const formatDate = (value) => new Intl.DateTimeFormat('fr-FR', { dateStyle: 'long', timeZone: 'UTC' }).format(new Date(`${value}T12:00:00Z`));
-    const books = records.map(({ fields }) => `- ${fields.Titre} × ${fields.Quantite}`).join('\n');
+    const books = records.map(({ fields }) => `- ${inventory.get(Number(fields.Titre))?.fields?.Titre || `Série ${fields.Titre}`} × ${fields.Quantite}`).join('\n');
     await sendMail(env, {
       to: input.professional_email,
       subject: 'Confirmation de votre réservation de livres et albums',
@@ -100,9 +100,7 @@ export async function onRequestPost({ request, env, waitUntil }) {
       Ecole: input.school,
       Date_Emprunt: input.loan_date,
       Date_Fin: input.end_date,
-      Titre: inventory.get(Number(item.id)).fields?.Titre || '',
-      Auteur: inventory.get(Number(item.id)).fields?.Auteur ?? '',
-      Lieu: inventory.get(Number(item.id)).fields?.Lieu ?? '',
+      Titre: Number(item.id),
       Quantite: Number(item.quantity),
     } }));
     const created = await gristRequest(env, bookLoansTable(env), {
@@ -115,7 +113,7 @@ export async function onRequestPost({ request, env, waitUntil }) {
     }, inventoryPayload.records || []));
     const backgroundTasks = Promise.all([
       syncBookAvailability(env, totals).catch((error) => console.error('Mise à jour du stock livres impossible :', error.message)),
-      sendReservationConfirmation(env, input, records, created),
+      sendReservationConfirmation(env, input, records, created, inventory),
     ]);
     if (waitUntil) waitUntil(backgroundTasks);
     else await backgroundTasks;

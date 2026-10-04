@@ -17,6 +17,9 @@ function bookKey(fields) {
 }
 
 function bookId(fields, inventoryRecords) {
+  const referenceId = Number(fields.Titre);
+  const referencedBook = inventoryRecords.find((record) => Number(record.id) === referenceId);
+  if (referencedBook) return referencedBook.id;
   const key = bookKey(fields);
   const record = inventoryRecords.find((item) => bookKey(item.fields || {}) === key);
   return record?.id;

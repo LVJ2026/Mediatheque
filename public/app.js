@@ -337,7 +337,12 @@ async function submitLoan(event) {
     state.bookLoans.push(...result);
     closeModal();
     renderSeriesCalendar();
-    refreshBookData().then(renderSeriesCalendar).catch((error) => console.error('Actualisation du stock après réservation impossible :', error));
+    try {
+      await refreshBookData();
+      renderSeriesCalendar();
+    } catch (error) {
+      console.error('Actualisation du stock après réservation impossible :', error);
+    }
   } else {
     state.loans.push(...result);
     closeModal();
