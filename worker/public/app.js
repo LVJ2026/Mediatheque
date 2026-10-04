@@ -122,6 +122,16 @@ function toggleBook(id) {
   state.selectedBooks = selected
     ? state.selectedBooks.filter((item) => item.id !== id)
     : [...state.selectedBooks, { ...book, requested_quantity: Math.max(1, Number(row?.querySelector('.book-quantity-input').value) || 1) }];
+  if (!selected) {
+    const today = iso(new Date());
+    const reservations = state.bookLoans
+      .filter((loan) => loan.is_active && loan.return_date >= today && state.selectedBooks.some((item) => sameBook(loan, item)))
+      .sort((first, second) => first.loan_date.localeCompare(second.loan_date));
+    const currentReservation = reservations.find((loan) => loan.loan_date <= today && today <= loan.occupied_until);
+    const nextReservation = currentReservation || reservations.find((loan) => loan.loan_date >= today);
+    if (nextReservation) state.month = new Date(`${nextReservation.loan_date}T12:00:00`);
+    else if (state.selectedBooks.length === 1) state.month = new Date();
+  }
   document.querySelectorAll('#series-body tr').forEach((row) => {
     const isSelected = state.selectedBooks.some((item) => item.id === Number(row.dataset.bookId));
     row.classList.toggle('selected', isSelected);
