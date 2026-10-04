@@ -101,6 +101,8 @@ function normalizeBookLoan(record, inventoryRecords = []) {
     Titre: fields.Titre || '',
     Auteur: fields.Auteur ?? '',
     Lieu: fields.Lieu ?? '',
+    is_active: (fields.Retour == null || fields.Retour === '')
+      && (fields.Date_Annulation == null || fields.Date_Annulation === ''),
     collection: 'books',
   };
 }

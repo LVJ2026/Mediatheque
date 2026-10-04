@@ -23,7 +23,7 @@ async function loadBooks() {
   state.bookLoans = await loansResponse.json();
   loadSchools();
   $('#series-count').textContent = `${state.books.length} série${state.books.length > 1 ? 's' : ''}`;
-  $('#series-body').innerHTML = state.books.map((book) => `<tr data-book-id="${book.id}"><td class="selection-cell"><input type="checkbox" aria-label="Sélectionner ${escapeHtml(book.Titre)}"></td><td><strong>${escapeHtml(book.Titre)}</strong></td><td>${escapeHtml(book.Auteur) || '—'}</td><td>${escapeHtml(book.Lieu) || '—'}</td><td><div class="book-quantity"><span>${escapeHtml(book.available_quantity)} disponible(s) / ${escapeHtml(book.quantity)} au total</span><input class="book-quantity-input" type="number" min="1" max="${Math.max(1, Number(book.quantity) || 1)}" value="1" aria-label="Quantité demandée pour ${escapeHtml(book.Titre)}"></div></td></tr>`).join('');
+  $('#series-body').innerHTML = state.books.map((book) => `<tr data-book-id="${book.id}"><td class="selection-cell"><input type="checkbox" aria-label="Sélectionner ${escapeHtml(book.Titre)}"></td><td><strong>${escapeHtml(book.Titre)}</strong></td><td>${escapeHtml(book.Auteur) || '—'}</td><td>${escapeHtml(book.Lieu) || '—'}</td><td><div class="book-quantity"><span>${escapeHtml(book.available_quantity)} disponible(s) / ${escapeHtml(book.quantity)} au total</span><input class="book-quantity-input" type="number" min="1" max="${Math.max(1, Number(book.available_quantity) || 1)}" value="1" ${Number(book.available_quantity) > 0 ? '' : 'disabled'} aria-label="Quantité demandée pour ${escapeHtml(book.Titre)}"></div></td></tr>`).join('');
   document.querySelectorAll('#series-body tr').forEach((row) => {
     row.addEventListener('click', (event) => { if (!event.target.closest('input')) toggleBook(Number(row.dataset.bookId)); });
     const checkbox = row.querySelector('input[type="checkbox"]');
@@ -49,12 +49,16 @@ async function refreshBookData() {
   state.bookLoans = await loansResponse.json();
   state.selectedBooks = state.books
     .filter((book) => selectedQuantities.has(book.id))
-    .map((book) => ({ ...book, requested_quantity: selectedQuantities.get(book.id) }));
+    .map((book) => ({ ...book, requested_quantity: Math.min(selectedQuantities.get(book.id), Math.max(1, Number(book.available_quantity) || 0)) }));
   document.querySelectorAll('#series-body tr').forEach((row) => {
     const book = state.books.find((item) => item.id === Number(row.dataset.bookId));
     if (!book) return;
     row.querySelector('.book-quantity span').textContent = `${book.available_quantity} disponible(s) / ${book.quantity} au total`;
-    row.querySelector('.book-quantity-input').max = Math.max(1, Number(book.quantity) || 1);
+    const quantityInput = row.querySelector('.book-quantity-input');
+    quantityInput.max = Math.max(1, Number(book.available_quantity) || 1);
+    quantityInput.disabled = Number(book.available_quantity) < 1;
+    const selectedBook = state.selectedBooks.find((item) => item.id === book.id);
+    if (selectedBook) quantityInput.value = selectedBook.requested_quantity;
     row.classList.toggle('selected', selectedQuantities.has(book.id));
     row.querySelector('input[type="checkbox"]').checked = selectedQuantities.has(book.id);
   });
@@ -153,6 +157,18 @@ function sameBook(loan, book) {
   if (Number(loan.book_id) === Number(book.id)) return true;
   return ['Titre', 'Auteur', 'Lieu'].every((field) => String(loan[field] ?? '').trim() === String(book[field] ?? '').trim());
 }
+function bookAvailabilityForDate(book, date) {
+  const bookings = state.bookLoans.filter((loan) => sameBook(loan, book));
+  const activeQuantity = bookings
+    .filter((loan) => loan.is_active === true)
+    .reduce((total, loan) => total + loan.quantity, 0);
+  const reste = Math.max(0, Number(book.available_quantity) || 0);
+  const total = Math.max(Number(book.quantity) || 0, reste + activeQuantity);
+  const reserved = bookings
+    .filter((loan) => loan.loan_date <= date && date <= (loan.occupied_until || loan.return_date))
+    .reduce((sum, loan) => sum + loan.quantity, 0);
+  return { total, available: Math.max(0, total - reserved) };
+}
 function seriesAvailability() {
   const days = new Map();
   const year = state.month.getFullYear();
@@ -163,12 +179,9 @@ function seriesAvailability() {
     let fullyReserved = false;
     let partiallyReserved = false;
     for (const book of state.selectedBooks) {
-      const reserved = state.bookLoans
-        .filter((loan) => sameBook(loan, book) && loan.loan_date <= date && date <= (loan.occupied_until || loan.return_date))
-        .reduce((total, loan) => total + loan.quantity, 0);
-      const remaining = Math.max(0, book.quantity - reserved);
-      fullyReserved ||= remaining === 0;
-      partiallyReserved ||= reserved > 0;
+      const { total, available } = bookAvailabilityForDate(book, date);
+      fullyReserved ||= available === 0;
+      partiallyReserved ||= available > 0 && available < total;
     }
     days.set(date, fullyReserved ? 'full' : partiallyReserved ? 'partial' : 'available');
   }
@@ -212,12 +225,7 @@ function availableQuantityForPeriod(book, startDate, endDate) {
     const nextAvailableDate = iso(nextAvailable);
     if (nextAvailableDate > startDate && nextAvailableDate <= endDate) changeDates.add(nextAvailableDate);
   }
-  return Math.min(...[...changeDates].map((date) => {
-    const borrowed = bookings
-      .filter((loan) => loan.loan_date <= date && date <= (loan.occupied_until || loan.return_date))
-      .reduce((total, loan) => total + loan.quantity, 0);
-    return Math.max(0, book.quantity - borrowed);
-  }));
+  return Math.min(...[...changeDates].map((date) => bookAvailabilityForDate(book, date).available));
 }
 function renderBookQuantityFields(startDate, endDate) {
   const container = $('#book-quantity-fields');
@@ -230,7 +238,7 @@ function renderBookQuantityFields(startDate, endDate) {
   }
   let noStock = false;
   container.innerHTML = state.selectedBooks.map((book) => {
-    const available = availableQuantityForPeriod(book, startDate, endDate);
+    const available = Math.min(Number(book.available_quantity) || 0, availableQuantityForPeriod(book, startDate, endDate));
     if (!available) noStock = true;
     book.requested_quantity = available ? Math.min(book.requested_quantity, available) : 1;
     return `<div class="book-quantity-item"><div><strong>${escapeHtml(book.Titre)}</strong><span>Disponible sur cette période : ${available}</span></div><label>Exemplaires<input data-book-quantity="${book.id}" type="number" min="1" max="${Math.max(1, available)}" value="${book.requested_quantity}" ${available ? '' : 'disabled'} required></label></div>${available ? '' : '<p class="form-error">Aucun exemplaire disponible sur cette période.</p>'}`;
