@@ -143,6 +143,10 @@ function clearBookSelection() {
   $('#series-calendar-content').hidden = true;
 }
 function occupiedDates() { const selectedIds = new Set(state.selectedGames.map((game) => game.id)); const days = new Set(); state.loans.filter((loan) => selectedIds.has(loan.game_id)).forEach((loan) => { const day = new Date(`${loan.loan_date}T12:00:00`); const end = new Date(`${loan.occupied_until || loan.return_date}T12:00:00`); while (day <= end) { days.add(iso(day)); day.setDate(day.getDate() + 1); } }); return days; }
+function sameBook(loan, book) {
+  if (Number(loan.book_id) === Number(book.id)) return true;
+  return ['Titre', 'Auteur', 'Lieu'].every((field) => String(loan[field] ?? '').trim() === String(book[field] ?? '').trim());
+}
 function seriesAvailability() {
   const days = new Map();
   const year = state.month.getFullYear();
@@ -154,7 +158,7 @@ function seriesAvailability() {
     let partiallyReserved = false;
     for (const book of state.selectedBooks) {
       const reserved = state.bookLoans
-        .filter((loan) => loan.book_id === book.id && loan.loan_date <= date && date <= (loan.occupied_until || loan.return_date))
+        .filter((loan) => sameBook(loan, book) && loan.loan_date <= date && date <= (loan.occupied_until || loan.return_date))
         .reduce((total, loan) => total + loan.quantity, 0);
       const remaining = Math.max(0, book.quantity - reserved);
       fullyReserved ||= remaining === 0;
@@ -165,7 +169,7 @@ function seriesAvailability() {
   return days;
 }
 function allBookings() { const source = state.collection === 'books' ? state.bookLoans : state.loans; const grouped = new Map(); source.forEach((loan) => { const key = [loan.name, loan.first_name, loan.professional_email, loan.school, loan.loan_date, loan.return_date, state.collection].join('\u001f'); if (!grouped.has(key)) grouped.set(key, { ...loan, collection: state.collection, ids: [], entries: [] }); const booking = grouped.get(key); booking.ids.push(loan.id); booking.entries.push(loan); }); return [...grouped.values()]; }
-function loansForDate(date) { const selectedIds = new Set(state.collection === 'books' ? state.selectedBooks.map((book) => book.id) : state.selectedGames.map((game) => game.id)); return allBookings().filter((booking) => booking.entries.some((loan) => selectedIds.has(state.collection === 'books' ? loan.book_id : loan.game_id) && loan.loan_date <= date && date <= (loan.occupied_until || loan.return_date))); }
+function loansForDate(date) { return allBookings().filter((booking) => booking.entries.some((loan) => { const selected = state.collection === 'books' ? state.selectedBooks.some((book) => sameBook(loan, book)) : state.selectedGames.some((game) => game.id === loan.game_id); return selected && loan.loan_date <= date && date <= (loan.occupied_until || loan.return_date); })); }
 function renderCalendar() { const year = state.month.getFullYear(); const month = state.month.getMonth(); $('#calendar-month').textContent = new Intl.DateTimeFormat('fr-FR', { month: 'long', year: 'numeric' }).format(state.month); const firstDay = (new Date(year, month, 1).getDay() + 6) % 7; const daysInMonth = new Date(year, month + 1, 0).getDate(); const today = iso(new Date()); const busy = occupiedDates(); let html = ''; for (let index = 0; index < firstDay; index += 1) html += '<button class="day empty" tabindex="-1" aria-hidden="true"></button>'; for (let day = 1; day <= daysInMonth; day += 1) { const date = iso(new Date(year, month, day)); const occupied = busy.has(date); const unavailable = occupied || date < today; const classes = ['day', occupied ? 'occupied' : '', date < today ? 'past' : '', date === today ? 'today' : ''].filter(Boolean).join(' '); const disabled = unavailable && !state.manager; html += `<button class="${classes}" data-date="${date}" ${disabled ? 'disabled' : ''}>${day}</button>`; } $('#calendar-grid').innerHTML = html; document.querySelectorAll('#calendar-grid .day:not(.empty)').forEach((button) => button.addEventListener('click', () => { if (button.classList.contains('occupied')) openManageModal(button.dataset.date); else openModal(button.dataset.date); })); }
 function renderSeriesCalendar() {
   const year = state.month.getFullYear();
@@ -193,7 +197,7 @@ function renderSeriesCalendar() {
   }));
 }
 function availableQuantityForPeriod(book, startDate, endDate) {
-  const bookings = state.bookLoans.filter((loan) => loan.book_id === book.id);
+  const bookings = state.bookLoans.filter((loan) => sameBook(loan, book));
   const changeDates = new Set([startDate]);
   for (const loan of bookings) {
     if (loan.loan_date > startDate && loan.loan_date <= endDate) changeDates.add(loan.loan_date);
@@ -291,24 +295,25 @@ async function submitLoan(event) {
     $('#form-error').textContent = result.detail || 'La réservation n’a pas pu être enregistrée.';
     return;
   }
-  if (isBooks) {
-    state.bookLoans.push(...result);
-    try {
-      await refreshBookData();
-    } catch (error) {
-      console.error('Actualisation du stock après réservation impossible :', error);
-    }
-  } else state.loans.push(...result);
-  closeModal();
-  if (isBooks) renderSeriesCalendar();
-  else renderCalendar();
   const returnDate = result[0]?.return_date || endDate;
   if (printWindow) printSheet('Fiche d’emprunt', data, isBooks ? bookSelection.map((item) => `${state.books.find((book) => book.id === item.id)?.Titre || 'Série'} × ${item.quantity}`) : state.selectedGames, loanDate, returnDate, printWindow);
-  if (!isBooks) clearGameSelection();
+  if (isBooks) {
+    state.bookLoans.push(...result);
+    closeModal();
+    renderSeriesCalendar();
+    refreshBookData().then(renderSeriesCalendar).catch((error) => console.error('Actualisation du stock après réservation impossible :', error));
+  } else {
+    state.loans.push(...result);
+    closeModal();
+    renderCalendar();
+    clearGameSelection();
+  }
   const emailStatus = response.headers.get('X-Email-Status');
   const emailError = response.headers.get('X-Email-Error');
   const printStatus = printWindow ? 'La fiche est prête à imprimer en PDF.' : 'Autorisez les fenêtres surgissantes pour imprimer la fiche.';
-  const emailMessage = emailStatus === 'pending'
+  const emailMessage = emailStatus === 'sending'
+    ? 'Le courriel de confirmation est en cours d’envoi.'
+    : emailStatus === 'pending'
     ? isBooks ? 'Le courriel de confirmation sera envoyé le jour de l’emprunt.' : 'Le courriel de confirmation est en cours d’envoi.'
     : emailStatus === 'sent'
       ? 'Le courriel de confirmation a été envoyé.'

@@ -48,7 +48,7 @@ function overlaps(loan, start, end) {
   return start <= (loan.occupied_until || loan.return_date) && end >= loan.loan_date;
 }
 
-export async function onRequestPost({ request, env }) {
+export async function onRequestPost({ request, env, waitUntil }) {
   try {
     assertConfigured(env);
     const input = await request.json();
@@ -114,11 +114,14 @@ export async function onRequestPost({ request, env }) {
       id: created.records?.[index]?.id,
       fields: record.fields,
     }, inventoryPayload.records || []));
-    await syncBookAvailability(env, totals);
-    const email = await sendSameDayConfirmation(env, input, records, created);
-    const headers = { 'X-Email-Status': email.status };
-    if (email.error) headers['X-Email-Error'] = encodeURIComponent(email.error);
-    return Response.json(loans, { status: 201, headers });
+    const confirmationDueToday = input.loan_date === dateInParis(new Date());
+    const backgroundTasks = Promise.all([
+      syncBookAvailability(env, totals).catch((error) => console.error('Mise à jour du stock livres impossible :', error.message)),
+      sendSameDayConfirmation(env, input, records, created),
+    ]);
+    if (waitUntil) waitUntil(backgroundTasks);
+    else await backgroundTasks;
+    return Response.json(loans, { status: 201, headers: { 'X-Email-Status': confirmationDueToday ? 'sending' : 'pending' } });
   } catch (error) {
     return Response.json({ detail: error.message }, { status: 503 });
   }
