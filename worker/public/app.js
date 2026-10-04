@@ -163,7 +163,9 @@ function bookAvailabilityForDate(book, date) {
     .filter((loan) => loan.is_active === true)
     .reduce((total, loan) => total + loan.quantity, 0);
   const reste = Math.max(0, Number(book.available_quantity) || 0);
-  const total = Math.max(Number(book.quantity) || 0, reste + activeQuantity);
+  const total = book.available_quantity == null
+    ? Math.max(0, Number(book.quantity) || 0)
+    : reste + activeQuantity;
   const reserved = bookings
     .filter((loan) => loan.loan_date <= date && date <= (loan.occupied_until || loan.return_date))
     .reduce((sum, loan) => sum + loan.quantity, 0);
