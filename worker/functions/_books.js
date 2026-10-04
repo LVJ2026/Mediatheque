@@ -87,4 +87,9 @@ async function syncBookAvailability(env, totalQuantities) {
   }
 }
 
-export { bookId, bookKey, bookLoansTable, bookQuantity, booksTable, isActiveBookLoan, loadBookStock, loansTable, syncBookAvailability };
+async function syncCurrentBookAvailability(env) {
+  const { totals } = await loadBookStock(env);
+  await syncBookAvailability(env, totals);
+}
+
+export { bookId, bookKey, bookLoansTable, bookQuantity, booksTable, isActiveBookLoan, loadBookStock, loansTable, syncBookAvailability, syncCurrentBookAvailability };

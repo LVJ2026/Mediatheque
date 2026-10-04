@@ -72,17 +72,15 @@ export async function onRequestPost({ request, env, waitUntil }) {
       fields: records[index].fields,
     }));
 
-  const emailResult = await sendConfirmationEmail(env, input);
-
-const headers = {
-  'X-Email-Status': emailResult.sent ? 'sent' : 'failed'
-};
-
-if (emailResult.error) {
-  headers['X-Email-Error'] = encodeURIComponent(emailResult.error);
-}
-
-return Response.json(loans, { status: 201, headers });
+    const emailTask = sendConfirmationEmail(env, input);
+    if (waitUntil) {
+      waitUntil(emailTask);
+      return Response.json(loans, { status: 201, headers: { 'X-Email-Status': 'sending' } });
+    }
+    const emailResult = await emailTask;
+    const headers = { 'X-Email-Status': emailResult.sent ? 'sent' : 'failed' };
+    if (emailResult.error) headers['X-Email-Error'] = encodeURIComponent(emailResult.error);
+    return Response.json(loans, { status: 201, headers });
 
   
   } catch (error) {

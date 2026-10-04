@@ -1,8 +1,8 @@
 import { assertConfigured, gristRequest } from '../../_grist.js';
-import { bookLoansTable, loadBookStock, loansTable, syncBookAvailability } from '../../_books.js';
+import { bookLoansTable, loansTable, syncCurrentBookAvailability } from '../../_books.js';
 import { isManager, unauthorized } from '../../_manager.js';
 
-export async function onRequestPost({ request, env }) {
+export async function onRequestPost({ request, env, waitUntil }) {
   if (!await isManager(request, env)) return unauthorized();
   try {
     assertConfigured(env);
@@ -17,13 +17,16 @@ export async function onRequestPost({ request, env }) {
     }
     const isBooks = input.collection === 'books';
     const table = isBooks ? bookLoansTable(env) : loansTable(env);
-    const stock = isBooks ? await loadBookStock(env) : null;
     const records = input.loan_ids.map((id) => ({ id: Number(id), fields: { Retour: input.return_date } }));
     await gristRequest(env, table, {
       method: 'PATCH',
       body: JSON.stringify({ records }),
     });
-    if (isBooks) await syncBookAvailability(env, stock.totals);
+    if (isBooks) {
+      const stockSync = syncCurrentBookAvailability(env).catch((error) => console.error('Mise à jour du stock après retour impossible :', error.message));
+      if (waitUntil) waitUntil(stockSync);
+      else await stockSync;
+    }
     return Response.json({ updated: records.length });
   } catch (error) {
     return Response.json({ detail: error.message }, { status: 503 });
