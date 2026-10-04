@@ -376,7 +376,7 @@ async function logoutManager() {
     const response = await fetch('/api/manager/logout', { method: 'POST', cache: 'no-store', credentials: 'same-origin' });
     const result = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(result.detail || `Erreur HTTP ${response.status}`);
-    showToast('Déconnexion effectuée.');
+    window.location.replace('/#home');
   } catch (error) {
     showToast(`Interface publique rétablie, mais la session serveur n’a pas été effacée : ${error.message || 'erreur réseau'}`);
   }
