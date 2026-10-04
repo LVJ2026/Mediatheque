@@ -172,9 +172,11 @@ function clearBookSelection() {
 function occupiedDates() { const selectedIds = new Set(state.selectedGames.map((game) => game.id)); const days = new Set(); state.loans.filter((loan) => selectedIds.has(loan.game_id)).forEach((loan) => { const day = new Date(`${loan.loan_date}T12:00:00`); const end = new Date(`${loan.occupied_until || loan.return_date}T12:00:00`); while (day <= end) { days.add(iso(day)); day.setDate(day.getDate() + 1); } }); return days; }
 function sameBook(loan, book) {
   if (Number(loan.book_id) === Number(book.id)) return true;
-  const normalize = (value) => String(value ?? '').normalize('NFKC').trim().replace(/\s+/g, ' ').toLocaleLowerCase('fr-FR');
+  const normalize = (value) => String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('fr-FR');
   const loanTitle = normalize(loan.Titre);
   if (!loanTitle || loanTitle !== normalize(book.Titre)) return false;
+  const sameTitleBooks = state.books.filter((item) => normalize(item.Titre) === loanTitle);
+  if (sameTitleBooks.length === 1) return true;
   return ['Auteur', 'Lieu'].every((field) => {
     const loanValue = normalize(loan[field]);
     const bookValue = normalize(book[field]);
