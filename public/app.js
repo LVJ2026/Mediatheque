@@ -38,6 +38,27 @@ async function loadBooks() {
     });
   });
 }
+async function refreshBookData() {
+  const selectedQuantities = new Map(state.selectedBooks.map((book) => [book.id, book.requested_quantity]));
+  const [booksResponse, loansResponse] = await Promise.all([
+    fetch('/api/books', { cache: 'no-store' }),
+    fetch('/api/book-loans', { cache: 'no-store' }),
+  ]);
+  if (!booksResponse.ok || !loansResponse.ok) throw new Error('Impossible d’actualiser le stock des séries.');
+  state.books = await booksResponse.json();
+  state.bookLoans = await loansResponse.json();
+  state.selectedBooks = state.books
+    .filter((book) => selectedQuantities.has(book.id))
+    .map((book) => ({ ...book, requested_quantity: selectedQuantities.get(book.id) }));
+  document.querySelectorAll('#series-body tr').forEach((row) => {
+    const book = state.books.find((item) => item.id === Number(row.dataset.bookId));
+    if (!book) return;
+    row.querySelector('.book-quantity span').textContent = `${book.available_quantity} disponible(s) / ${book.quantity} au total`;
+    row.querySelector('.book-quantity-input').max = Math.max(1, Number(book.quantity) || 1);
+    row.classList.toggle('selected', selectedQuantities.has(book.id));
+    row.querySelector('input[type="checkbox"]').checked = selectedQuantities.has(book.id);
+  });
+}
 async function refreshLoans() {
   if ((!state.games.length && !state.books.length) || loansRefreshInFlight) return;
   loansRefreshInFlight = true;
@@ -270,15 +291,20 @@ async function submitLoan(event) {
     $('#form-error').textContent = result.detail || 'La réservation n’a pas pu être enregistrée.';
     return;
   }
-  if (isBooks) state.bookLoans.push(...result);
-  else state.loans.push(...result);
+  if (isBooks) {
+    state.bookLoans.push(...result);
+    try {
+      await refreshBookData();
+    } catch (error) {
+      console.error('Actualisation du stock après réservation impossible :', error);
+    }
+  } else state.loans.push(...result);
   closeModal();
   if (isBooks) renderSeriesCalendar();
   else renderCalendar();
   const returnDate = result[0]?.return_date || endDate;
   if (printWindow) printSheet('Fiche d’emprunt', data, isBooks ? bookSelection.map((item) => `${state.books.find((book) => book.id === item.id)?.Titre || 'Série'} × ${item.quantity}`) : state.selectedGames, loanDate, returnDate, printWindow);
-  if (isBooks) clearBookSelection();
-  else clearGameSelection();
+  if (!isBooks) clearGameSelection();
   const emailStatus = response.headers.get('X-Email-Status');
   const emailError = response.headers.get('X-Email-Error');
   const printStatus = printWindow ? 'La fiche est prête à imprimer en PDF.' : 'Autorisez les fenêtres surgissantes pour imprimer la fiche.';

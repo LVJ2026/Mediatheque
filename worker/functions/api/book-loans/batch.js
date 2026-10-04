@@ -1,5 +1,42 @@
 import { addDays, assertConfigured, gristRequest, normalizeBookLoan } from '../../_grist.js';
 import { bookId, bookLoansTable, loadBookStock, syncBookAvailability } from '../../_books.js';
+import { sendMail } from '../../_mail.js';
+
+function dateInParis(date) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Paris',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+async function sendSameDayConfirmation(env, input, records, created) {
+  if (input.loan_date !== dateInParis(new Date())) return { status: 'pending', error: '' };
+  try {
+    const formatDate = (value) => new Intl.DateTimeFormat('fr-FR', { dateStyle: 'long', timeZone: 'UTC' }).format(new Date(`${value}T12:00:00Z`));
+    const books = records.map(({ fields }) => `- ${fields.Titre} × ${fields.Quantite}`).join('\n');
+    await sendMail(env, {
+      to: input.professional_email,
+      subject: 'Confirmation de votre emprunt de livres et albums',
+      text: `Bonjour ${input.first_name} ${input.name},\n\nVotre emprunt commence aujourd’hui pour :\n${books}\n\nLe retour est prévu le ${formatDate(input.end_date)}.\n\nMédiathèque`,
+    });
+    const ids = (created.records || []).map((record) => record.id).filter((id) => Number.isInteger(id));
+    if (ids.length) {
+      await gristRequest(env, bookLoansTable(env), {
+        method: 'PATCH',
+        body: JSON.stringify({ records: ids.map((id) => ({ id, fields: { Confirmation_Envoyee: dateInParis(new Date()) } })) }),
+      });
+    }
+    return { status: 'sent', error: '' };
+  } catch (error) {
+    const message = String(error.message || 'Erreur SMTP inconnue').slice(0, 200);
+    console.error('Échec du courriel de confirmation livres :', message);
+    return { status: 'failed', error: message };
+  }
+}
 
 function isValidDate(value) {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
@@ -78,7 +115,10 @@ export async function onRequestPost({ request, env }) {
       fields: record.fields,
     }, inventoryPayload.records || []));
     await syncBookAvailability(env, totals);
-    return Response.json(loans, { status: 201, headers: { 'X-Email-Status': 'pending' } });
+    const email = await sendSameDayConfirmation(env, input, records, created);
+    const headers = { 'X-Email-Status': email.status };
+    if (email.error) headers['X-Email-Error'] = encodeURIComponent(email.error);
+    return Response.json(loans, { status: 201, headers });
   } catch (error) {
     return Response.json({ detail: error.message }, { status: 503 });
   }
