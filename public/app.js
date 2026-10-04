@@ -182,10 +182,8 @@ function seriesAvailability() {
     let partiallyReserved = false;
     for (const book of state.selectedBooks) {
       const { total, available } = bookAvailabilityForDate(book, date);
-      const inventoryTotal = Number(book.quantity) || 0;
-      const reste = Math.max(0, Number(book.available_quantity) || 0);
-      fullyReserved ||= reste === 0 || available === 0;
-      partiallyReserved ||= inventoryTotal !== reste || (available > 0 && available < total);
+      fullyReserved ||= available === 0;
+      partiallyReserved ||= available > 0 && available < total;
     }
     days.set(date, fullyReserved ? 'full' : partiallyReserved ? 'partial' : 'available');
   }
