@@ -358,7 +358,10 @@ async function submitLoan(event) {
       : `Échec du courriel : ${emailError ? decodeURIComponent(emailError) : 'aucun détail reçu'}.`;
   showToast(`Réservation enregistrée. ${printStatus} ${emailMessage}`);
 }
-async function loginManager(event) { event.preventDefault(); const form = event.currentTarget; const response = await fetch('/api/manager/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: form.password.value }) }); const result = await response.json(); if (!response.ok) { $('#manager-error').textContent = result.detail || 'Connexion impossible.'; return; } state.manager = true; form.reset(); $('#manager-modal').hidden = true; $('#manager-button').hidden = true; $('#logout-manager').hidden = false; if (state.selectedGames.length) renderCalendar(); if (state.selectedBooks.length) renderSeriesCalendar(); showToast('Mode gestionnaire activé.'); }
+function syncManagerButtons() { $('#manager-button').hidden = state.manager; $('#logout-manager').hidden = !state.manager; }
+window.addEventListener('hashchange', syncManagerButtons);
+syncManagerButtons();
+async function loginManager(event) { event.preventDefault(); const form = event.currentTarget; const response = await fetch('/api/manager/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: form.password.value }) }); const result = await response.json(); if (!response.ok) { $('#manager-error').textContent = result.detail || 'Connexion impossible.'; return; } state.manager = true; syncManagerButtons(); form.reset(); $('#manager-modal').hidden = true; if (state.selectedGames.length) renderCalendar(); if (state.selectedBooks.length) renderSeriesCalendar(); showToast('Mode gestionnaire activé.'); }
 function openManagerModal() { $('#manager-error').textContent = ''; $('#manager-modal').hidden = false; $('#manager-password').focus(); }
 function closeManagerModal() { $('#manager-modal').hidden = true; }
 async function logoutManager() {
@@ -367,8 +370,7 @@ async function logoutManager() {
   clearBookSelection();
   closeManageModal();
   closeManagerModal();
-  $('#logout-manager').hidden = true;
-  $('#manager-button').hidden = false;
+  syncManagerButtons();
   location.hash = '#home';
   try {
     const response = await fetch('/api/manager/logout', { method: 'POST', cache: 'no-store', credentials: 'same-origin' });
