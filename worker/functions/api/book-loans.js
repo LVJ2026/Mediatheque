@@ -14,7 +14,6 @@ export async function onRequestGet({ env }) {
     });
     return Response.json(records.map((record) => normalizeBookLoan(record, inventory.records || [])));
   } catch (error) {
-    if (error.message.startsWith('Grist 404')) return Response.json([]);
     return Response.json({ detail: error.message }, { status: 503 });
   }
 }

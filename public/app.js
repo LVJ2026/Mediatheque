@@ -21,7 +21,11 @@ async function loadBooks() {
     fetch('/api/books', { cache: 'no-store' }),
     fetch('/api/book-loans', { cache: 'no-store' }),
   ]);
-  if (!booksResponse.ok || !loansResponse.ok) throw new Error('Impossible de charger l’inventaire des livres et albums.');
+  if (!booksResponse.ok || !loansResponse.ok) {
+    const failedResponse = !loansResponse.ok ? loansResponse : booksResponse;
+    const detail = await failedResponse.json().catch(() => ({}));
+    throw new Error(detail.detail || 'Impossible de charger l’inventaire et les réservations des livres et albums.');
+  }
   state.books = await booksResponse.json();
   state.bookLoans = await loansResponse.json();
   loadSchools();
