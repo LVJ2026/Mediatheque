@@ -365,6 +365,7 @@ async function loginManager(event) { event.preventDefault(); const form = event.
 function openManagerModal() { $('#manager-error').textContent = ''; $('#manager-modal').hidden = false; $('#manager-password').focus(); }
 function closeManagerModal() { $('#manager-modal').hidden = true; }
 async function logoutManager() {
+  showToast('Déconnexion en cours…');
   state.manager = false;
   clearGameSelection();
   clearBookSelection();
@@ -376,6 +377,7 @@ async function logoutManager() {
     const response = await fetch('/api/manager/logout', { method: 'POST', cache: 'no-store', credentials: 'same-origin' });
     const result = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(result.detail || `Erreur HTTP ${response.status}`);
+    showToast('Déconnexion effectuée. Retour à l’accueil…');
     window.location.replace('/#home');
   } catch (error) {
     showToast(`Interface publique rétablie, mais la session serveur n’a pas été effacée : ${error.message || 'erreur réseau'}`);
