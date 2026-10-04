@@ -49,7 +49,11 @@ async function loadBookStock(env) {
     const id = Number(bookId(fields, inventory.records || []));
     if (borrowed.has(id)) borrowed.set(id, borrowed.get(id) + bookQuantity(fields));
   }
-  const available = new Map([...totals].map(([id, quantity]) => [id, Math.max(0, quantity - borrowed.get(id))]));
+  const available = new Map((inventory.records || []).map((record) => {
+    const id = Number(record.id);
+    const remainder = record.fields?.Reste;
+    return [id, Math.max(0, remainder == null ? totals.get(id) - borrowed.get(id) : Number(remainder))];
+  }));
   return { inventory, loans, totals, available };
 }
 
@@ -70,7 +74,7 @@ async function syncBookAvailability(env, totalQuantities) {
     .filter((record) => totalQuantities.has(Number(record.id)))
     .map((record) => ({
       id: record.id,
-      fields: { Qte_empruntee: Math.max(0, totalQuantities.get(Number(record.id)) - reserved.get(Number(record.id))) },
+      fields: { Qte_empruntee: reserved.get(Number(record.id)) },
     }));
   if (records.length) {
     await gristRequest(env, booksTable(env), {

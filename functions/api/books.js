@@ -8,7 +8,9 @@ export async function onRequestGet({ env }) {
     return Response.json((inventory.records || []).map((record) => ({
       ...normalizeBook(record),
       quantity: totals.get(Number(record.id)) ?? 0,
-      available_quantity: available.get(Number(record.id)) ?? 0,
+      available_quantity: record.fields?.Reste == null
+        ? available.get(Number(record.id)) ?? 0
+        : Math.max(0, Number(record.fields.Reste)),
     })));
   } catch (error) {
     return Response.json({ detail: error.message }, { status: 503 });
