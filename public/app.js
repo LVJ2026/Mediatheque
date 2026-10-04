@@ -171,6 +171,52 @@ function renderSeriesCalendar() {
     else openModal(button.dataset.date);
   }));
 }
+function availableQuantityForPeriod(book, startDate, endDate) {
+  const bookings = state.bookLoans.filter((loan) => loan.book_id === book.id);
+  const changeDates = new Set([startDate]);
+  for (const loan of bookings) {
+    if (loan.loan_date > startDate && loan.loan_date <= endDate) changeDates.add(loan.loan_date);
+    const nextAvailable = new Date(`${loan.occupied_until || loan.return_date}T12:00:00`);
+    nextAvailable.setDate(nextAvailable.getDate() + 1);
+    const nextAvailableDate = iso(nextAvailable);
+    if (nextAvailableDate > startDate && nextAvailableDate <= endDate) changeDates.add(nextAvailableDate);
+  }
+  return Math.min(...[...changeDates].map((date) => {
+    const borrowed = bookings
+      .filter((loan) => loan.loan_date <= date && date <= (loan.occupied_until || loan.return_date))
+      .reduce((total, loan) => total + loan.quantity, 0);
+    return Math.max(0, book.quantity - borrowed);
+  }));
+}
+function renderBookQuantityFields(startDate, endDate) {
+  const container = $('#book-quantity-fields');
+  const isBooks = state.collection === 'books';
+  container.hidden = !isBooks;
+  const submitButton = $('#loan-form').querySelector('button[type="submit"]');
+  if (!isBooks) {
+    submitButton.disabled = false;
+    return;
+  }
+  let noStock = false;
+  container.innerHTML = state.selectedBooks.map((book) => {
+    const available = availableQuantityForPeriod(book, startDate, endDate);
+    if (!available) noStock = true;
+    book.requested_quantity = available ? Math.min(book.requested_quantity, available) : 1;
+    return `<div class="book-quantity-item"><div><strong>${escapeHtml(book.Titre)}</strong><span>Disponible sur cette période : ${available}</span></div><label>Exemplaires<input data-book-quantity="${book.id}" type="number" min="1" max="${Math.max(1, available)}" value="${book.requested_quantity}" ${available ? '' : 'disabled'} required></label></div>${available ? '' : '<p class="form-error">Aucun exemplaire disponible sur cette période.</p>'}`;
+  }).join('');
+  submitButton.disabled = noStock;
+  $('#loan-form').dataset.bookSelection = JSON.stringify(state.selectedBooks.map((book) => ({ id: book.id, quantity: book.requested_quantity })));
+  container.querySelectorAll('[data-book-quantity]').forEach((input) => input.addEventListener('input', () => {
+    const book = state.selectedBooks.find((item) => item.id === Number(input.dataset.bookQuantity));
+    if (!book) return;
+    const maximum = Number(input.max);
+    book.requested_quantity = Math.min(maximum, Math.max(1, Number(input.value) || 1));
+    input.value = book.requested_quantity;
+    const inventoryInput = document.querySelector(`#series-body tr[data-book-id="${book.id}"] .book-quantity-input`);
+    if (inventoryInput) inventoryInput.value = book.requested_quantity;
+    $('#loan-form').dataset.bookSelection = JSON.stringify(state.selectedBooks.map((item) => ({ id: item.id, quantity: item.requested_quantity })));
+  }));
+}
 function openModal(date) {
   const form = $('#loan-form');
   const startInput = $('#loan-start-date');
@@ -192,6 +238,7 @@ function openModal(date) {
     }
     if (endInput.value < startInput.value) endInput.value = startInput.value;
     $('#modal-date').textContent = `Du ${formatDate(startInput.value)} au ${formatDate(endInput.value)}`;
+    renderBookQuantityFields(startInput.value, endInput.value);
   };
   startInput.onchange = updateDates;
   endInput.onchange = updateDates;
