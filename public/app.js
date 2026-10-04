@@ -361,7 +361,24 @@ async function submitLoan(event) {
 async function loginManager(event) { event.preventDefault(); const form = event.currentTarget; const response = await fetch('/api/manager/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: form.password.value }) }); const result = await response.json(); if (!response.ok) { $('#manager-error').textContent = result.detail || 'Connexion impossible.'; return; } state.manager = true; form.reset(); $('#manager-modal').hidden = true; $('#manager-button').hidden = true; $('#logout-manager').hidden = false; if (state.selectedGames.length) renderCalendar(); if (state.selectedBooks.length) renderSeriesCalendar(); showToast('Mode gestionnaire activé.'); }
 function openManagerModal() { $('#manager-error').textContent = ''; $('#manager-modal').hidden = false; $('#manager-password').focus(); }
 function closeManagerModal() { $('#manager-modal').hidden = true; }
-async function logoutManager() { try { const response = await fetch('/api/manager/logout', { method: 'POST' }); if (!response.ok) throw new Error('La déconnexion n’a pas pu être enregistrée.'); state.manager = false; clearGameSelection(); clearBookSelection(); closeManageModal(); closeManagerModal(); $('#logout-manager').hidden = true; $('#manager-button').hidden = false; location.hash = '#home'; showToast('Déconnexion effectuée.'); } catch (error) { showToast(error.message || 'Déconnexion impossible.'); } }
+async function logoutManager() {
+  state.manager = false;
+  clearGameSelection();
+  clearBookSelection();
+  closeManageModal();
+  closeManagerModal();
+  $('#logout-manager').hidden = true;
+  $('#manager-button').hidden = false;
+  location.hash = '#home';
+  try {
+    const response = await fetch('/api/manager/logout', { method: 'POST', cache: 'no-store', credentials: 'same-origin' });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.detail || `Erreur HTTP ${response.status}`);
+    showToast('Déconnexion effectuée.');
+  } catch (error) {
+    showToast(`Interface publique rétablie, mais la session serveur n’a pas été effacée : ${error.message || 'erreur réseau'}`);
+  }
+}
 $('#logout-manager').addEventListener('click', logoutManager);
 function openManageModal(date) { const bookings = loansForDate(date); if (!bookings.length) return; $('#manage-modal').dataset.date = date; $('#manage-date').textContent = formatDate(date); $('#manage-list').innerHTML = bookings.map((booking) => { const resources = booking.entries.map((loan) => booking.collection === 'books' ? `${state.books.find((item) => item.id === loan.book_id)?.Titre || 'Série'} × ${loan.quantity}` : state.games.find((item) => item.id === loan.game_id)?.Jeu || 'Jeu'); return `<article class="manage-item"><div><strong>${escapeHtml(resources.join(' + '))}</strong><span>${escapeHtml(booking.name)} ${escapeHtml(booking.first_name)} · du ${formatDate(booking.loan_date)} au ${formatDate(booking.return_date)}</span></div><div class="manage-actions"><button class="secondary-button" data-print-id="${booking.id}" type="button">Fiche</button><button class="secondary-button" data-return-id="${booking.id}" data-return-date="${date}" type="button">Annuler à partir de cette date</button><button class="danger-button" data-delete-id="${booking.id}" data-return-date="${date}" type="button">Supprimer toute la réservation</button></div></article>`; }).join(''); $('#manage-modal').hidden = false; document.querySelectorAll('[data-print-id]').forEach((button) => button.addEventListener('click', () => printLoan(Number(button.dataset.printId)))); document.querySelectorAll('[data-return-id]').forEach((button) => button.addEventListener('click', () => returnLoan(Number(button.dataset.returnId), button.dataset.returnDate))); document.querySelectorAll('[data-delete-id]').forEach((button) => button.addEventListener('click', () => deleteBooking(Number(button.dataset.deleteId), button.dataset.returnDate))); }
 function closeManageModal() { $('#manage-modal').hidden = true; }
