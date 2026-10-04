@@ -8,6 +8,10 @@ function bookLoansTable(env) {
   return env.GRIST_BOOKS_LOANS_TABLE || 'Emprunts livres albums';
 }
 
+function loansTable(env) {
+  return env.GRIST_LOANS_TABLE || 'Table1';
+}
+
 function bookKey(fields) {
   return [fields.Titre, fields.Auteur, fields.Lieu].map((value) => String(value ?? '').trim()).join('\u001f');
 }
@@ -74,4 +78,4 @@ async function syncBookAvailability(env, totalQuantities) {
   }
 }
 
-export { bookId, bookKey, bookLoansTable, bookQuantity, booksTable, isActiveBookLoan, loadBookStock, syncBookAvailability };
+export { bookId, bookKey, bookLoansTable, bookQuantity, booksTable, isActiveBookLoan, loadBookStock, loansTable, syncBookAvailability };

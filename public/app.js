@@ -23,7 +23,7 @@ async function loadBooks() {
   state.bookLoans = await loansResponse.json();
   loadSchools();
   $('#series-count').textContent = `${state.books.length} série${state.books.length > 1 ? 's' : ''}`;
-  $('#series-body').innerHTML = state.books.map((book) => `<tr data-book-id="${book.id}"><td class="selection-cell"><input type="checkbox" aria-label="Sélectionner ${escapeHtml(book.Titre)}"></td><td><strong>${escapeHtml(book.Titre)}</strong></td><td>${escapeHtml(book.Auteur) || '—'}</td><td>${escapeHtml(book.Lieu) || '—'}</td><td><div class="book-quantity"><span>${escapeHtml(book.quantity)} au total</span><input class="book-quantity-input" type="number" min="1" max="${Math.max(1, Number(book.quantity) || 1)}" value="1" aria-label="Quantité demandée pour ${escapeHtml(book.Titre)}"></div></td></tr>`).join('');
+  $('#series-body').innerHTML = state.books.map((book) => `<tr data-book-id="${book.id}"><td class="selection-cell"><input type="checkbox" aria-label="Sélectionner ${escapeHtml(book.Titre)}"></td><td><strong>${escapeHtml(book.Titre)}</strong></td><td>${escapeHtml(book.Auteur) || '—'}</td><td>${escapeHtml(book.Lieu) || '—'}</td><td><div class="book-quantity"><span>${escapeHtml(book.available_quantity)} disponible(s) / ${escapeHtml(book.quantity)} au total</span><input class="book-quantity-input" type="number" min="1" max="${Math.max(1, Number(book.quantity) || 1)}" value="1" aria-label="Quantité demandée pour ${escapeHtml(book.Titre)}"></div></td></tr>`).join('');
   document.querySelectorAll('#series-body tr').forEach((row) => {
     row.addEventListener('click', (event) => { if (!event.target.closest('input')) toggleBook(Number(row.dataset.bookId)); });
     const checkbox = row.querySelector('input[type="checkbox"]');

@@ -1,5 +1,5 @@
 import { addDays, assertConfigured, gristRequest, normalizeBookLoan } from '../../_grist.js';
-import { bookLoansTable, bookId, bookQuantity, booksTable, loadBookStock, syncBookAvailability } from '../../_books.js';
+import { bookId, bookLoansTable, loadBookStock, syncBookAvailability } from '../../_books.js';
 
 function isValidDate(value) {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
@@ -50,7 +50,7 @@ export async function onRequestPost({ request, env }) {
         if (nextAvailableDay <= input.end_date) changeDates.add(nextAvailableDay);
       }
       for (const date of changeDates) {
-        const alreadyReserved = overlapping.reduce((total, loan) => total + (loan.loan_date <= date && date <= loan.occupied_until ? bookQuantity({ Quantite: loan.quantity }) : 0), 0);
+        const alreadyReserved = overlapping.reduce((total, loan) => total + (loan.loan_date <= date && date <= loan.occupied_until ? loan.quantity : 0), 0);
         if (alreadyReserved + Number(item.quantity) > quantity) {
           return Response.json({ detail: `Stock insuffisant pour ${book.fields?.Titre || `la série ${id}`} du ${date}.` }, { status: 409 });
         }
