@@ -1,5 +1,5 @@
 import { assertConfigured, gristRequest } from '../../_grist.js';
-import { bookId, loansTable, syncReservedQuantities } from '../../_books.js';
+import { bookLoansTable, loadBookStock, loansTable, syncBookAvailability } from '../../_books.js';
 import { isManager, unauthorized } from '../../_manager.js';
 
 export async function onRequestPost({ request, env }) {
@@ -15,19 +15,15 @@ export async function onRequestPost({ request, env }) {
     if (!Array.isArray(input.loan_ids) || !input.loan_ids.length || !input.loan_ids.every((id) => Number.isInteger(Number(id)) && Number(id) > 0) || !validDate) {
       return Response.json({ detail: 'Identifiants ou date de retour invalides.' }, { status: 422 });
     }
-    const table = loansTable(env);
-    const loanPayload = await gristRequest(env, table);
-    const selectedIds = new Set(input.loan_ids.map(Number));
-    const affectedBooks = (loanPayload.records || [])
-      .filter((record) => selectedIds.has(Number(record.id)))
-      .map((record) => bookId(record.fields || {}))
-      .filter((id) => Number.isInteger(id) && id > 0);
+    const isBooks = input.collection === 'books';
+    const table = isBooks ? bookLoansTable(env) : loansTable(env);
+    const stock = isBooks ? await loadBookStock(env) : null;
     const records = input.loan_ids.map((id) => ({ id: Number(id), fields: { Retour: input.return_date } }));
     await gristRequest(env, table, {
       method: 'PATCH',
       body: JSON.stringify({ records }),
     });
-    await syncReservedQuantities(env, affectedBooks);
+    if (isBooks) await syncBookAvailability(env, stock.totals);
     return Response.json({ updated: records.length });
   } catch (error) {
     return Response.json({ detail: error.message }, { status: 503 });

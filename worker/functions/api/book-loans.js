@@ -1,15 +1,18 @@
 import { assertConfigured, gristRequest, normalizeBookLoan } from '../_grist.js';
-import { bookId, loansTable } from '../_books.js';
+import { bookLoansTable, booksTable } from '../_books.js';
 
 export async function onRequestGet({ env }) {
   try {
     assertConfigured(env);
-    const payload = await gristRequest(env, loansTable(env));
+    const [inventory, payload] = await Promise.all([
+      gristRequest(env, booksTable(env)),
+      gristRequest(env, bookLoansTable(env)),
+    ]);
     const records = (payload.records || []).filter((record) => {
       const fields = record.fields || {};
-      return bookId(fields) > 0 && (fields.Date_Emprunt != null || fields['Date Emprunt'] != null);
+      return Boolean(fields.Titre) && (fields.Date_Emprunt != null || fields['Date Emprunt'] != null);
     });
-    return Response.json(records.map(normalizeBookLoan));
+    return Response.json(records.map((record) => normalizeBookLoan(record, inventory.records || [])));
   } catch (error) {
     if (error.message.startsWith('Grist 404')) return Response.json([]);
     return Response.json({ detail: error.message }, { status: 503 });

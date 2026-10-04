@@ -1,5 +1,5 @@
 import { addDays, assertConfigured, gristRequest, normalizeBookLoan } from '../../_grist.js';
-import { booksTable, bookId, loansTable, syncReservedQuantities } from '../../_books.js';
+import { bookId, bookLoansTable, loadBookStock, syncBookAvailability } from '../../_books.js';
 
 function isValidDate(value) {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
@@ -25,23 +25,20 @@ export async function onRequestPost({ request, env }) {
       return Response.json({ detail: 'Tous les champs sont obligatoires; vérifiez les quantités et la période.' }, { status: 422 });
     }
 
-    const [inventoryPayload, loansPayload] = await Promise.all([
-      gristRequest(env, booksTable(env)),
-      gristRequest(env, loansTable(env)),
-    ]);
+    const { inventory: inventoryPayload, loans: loansPayload, totals } = await loadBookStock(env);
     const inventory = new Map((inventoryPayload.records || []).map((record) => [Number(record.id), record]));
     const activeLoans = (loansPayload.records || [])
       .filter((record) => {
         const fields = record.fields || {};
-        return bookId(fields) > 0 && (fields.Date_Emprunt != null || fields['Date Emprunt'] != null);
+        return bookId(fields, inventoryPayload.records || []) > 0 && (fields.Date_Emprunt != null || fields['Date Emprunt'] != null);
       })
-      .map(normalizeBookLoan);
+      .map((record) => normalizeBookLoan(record, inventoryPayload.records || []));
 
     for (const item of selection) {
       const id = Number(item.id);
       const book = inventory.get(id);
       if (!book) return Response.json({ detail: 'Une série sélectionnée est introuvable dans l’inventaire.' }, { status: 409 });
-      const quantity = Number(book.fields?.Quantite ?? book.fields?.['Quantité'] ?? 0);
+      const quantity = totals.get(id) ?? 0;
       if (!Number.isFinite(quantity) || quantity < Number(item.quantity)) {
         return Response.json({ detail: `La quantité demandée dépasse le stock de la série ${book.fields?.Titre || id}.` }, { status: 409 });
       }
@@ -67,18 +64,20 @@ export async function onRequestPost({ request, env }) {
       Ecole: input.school,
       Date_Emprunt: input.loan_date,
       Date_Fin: input.end_date,
-      Livre_album: Number(item.id),
-      Quantite_demandee: Number(item.quantity),
+      Titre: inventory.get(Number(item.id)).fields?.Titre || '',
+      Auteur: inventory.get(Number(item.id)).fields?.Auteur ?? '',
+      Lieu: inventory.get(Number(item.id)).fields?.Lieu ?? '',
+      Quantite: Number(item.quantity),
     } }));
-    const created = await gristRequest(env, loansTable(env), {
+    const created = await gristRequest(env, bookLoansTable(env), {
       method: 'POST',
       body: JSON.stringify({ records }),
     });
     const loans = records.map((record, index) => normalizeBookLoan({
       id: created.records?.[index]?.id,
       fields: record.fields,
-    }));
-    await syncReservedQuantities(env, selection.map((item) => item.id));
+    }, inventoryPayload.records || []));
+    await syncBookAvailability(env, totals);
     return Response.json(loans, { status: 201, headers: { 'X-Email-Status': 'pending' } });
   } catch (error) {
     return Response.json({ detail: error.message }, { status: 503 });
