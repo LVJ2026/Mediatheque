@@ -13,15 +13,14 @@ function dateInParis(date) {
   return `${values.year}-${values.month}-${values.day}`;
 }
 
-async function sendSameDayConfirmation(env, input, records, created) {
-  if (input.loan_date !== dateInParis(new Date())) return { status: 'pending', error: '' };
+async function sendReservationConfirmation(env, input, records, created) {
   try {
     const formatDate = (value) => new Intl.DateTimeFormat('fr-FR', { dateStyle: 'long', timeZone: 'UTC' }).format(new Date(`${value}T12:00:00Z`));
     const books = records.map(({ fields }) => `- ${fields.Titre} × ${fields.Quantite}`).join('\n');
     await sendMail(env, {
       to: input.professional_email,
-      subject: 'Confirmation de votre emprunt de livres et albums',
-      text: `Bonjour ${input.first_name} ${input.name},\n\nVotre emprunt commence aujourd’hui pour :\n${books}\n\nLe retour est prévu le ${formatDate(input.end_date)}.\n\nMédiathèque`,
+      subject: 'Confirmation de votre réservation de livres et albums',
+      text: `Bonjour ${input.first_name} ${input.name},\n\nVotre réservation est confirmée pour :\n${books}\n\nDu ${formatDate(input.loan_date)} au ${formatDate(input.end_date)}.\n\nMédiathèque`,
     });
     const ids = (created.records || []).map((record) => record.id).filter((id) => Number.isInteger(id));
     if (ids.length) {
@@ -114,14 +113,13 @@ export async function onRequestPost({ request, env, waitUntil }) {
       id: created.records?.[index]?.id,
       fields: record.fields,
     }, inventoryPayload.records || []));
-    const confirmationDueToday = input.loan_date === dateInParis(new Date());
     const backgroundTasks = Promise.all([
       syncBookAvailability(env, totals).catch((error) => console.error('Mise à jour du stock livres impossible :', error.message)),
-      sendSameDayConfirmation(env, input, records, created),
+      sendReservationConfirmation(env, input, records, created),
     ]);
     if (waitUntil) waitUntil(backgroundTasks);
     else await backgroundTasks;
-    return Response.json(loans, { status: 201, headers: { 'X-Email-Status': confirmationDueToday ? 'sending' : 'pending' } });
+    return Response.json(loans, { status: 201, headers: { 'X-Email-Status': 'sending' } });
   } catch (error) {
     return Response.json({ detail: error.message }, { status: 503 });
   }

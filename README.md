@@ -81,6 +81,6 @@ Emprunts livres/albums (`Emprunts livres albums`) : ajouter les colonnes emprunt
 
 Inventaire livres/albums (`Inventaire livres albums`) : `Titre`, `Auteur`, `Lieu`, `Quantite`, `Qte_empruntee` (affiché « Qté empruntée ») et `Reste`. `Quantite` est le stock total. `Qte_empruntee` contient le nombre total d’exemplaires actuellement empruntés et est recalculé depuis les emprunts actifs après réservation, retour ou annulation. `Reste` est la disponibilité affichée dans l’application, généralement calculée par Grist comme `Quantite - Qte_empruntee`. Une réservation de plusieurs séries crée une ligne par série, avec le même emprunteur et la même période. Les marqueurs `Rappel_Envoye` et `Confirmation_Envoyee` évitent les courriels en double; ajoutez-les comme colonnes Date dans la table des emprunts livres/albums.
 
-Les rappels de retour des jeux lisent `Table1`; les confirmations du jour d’emprunt et les rappels à trois jours des livres/albums lisent `Emprunts livres albums`.
+Les rappels de retour des jeux lisent `Table1`; la confirmation des livres/albums part dès la création de la réservation, et le rappel à trois jours est envoyé par le Worker depuis `Emprunts livres albums`.
 
 Une reservation groupant plusieurs jeux cree une ligne Grist par jeu, pour la meme periode.

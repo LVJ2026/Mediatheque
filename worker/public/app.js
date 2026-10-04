@@ -168,7 +168,14 @@ function clearBookSelection() {
 function occupiedDates() { const selectedIds = new Set(state.selectedGames.map((game) => game.id)); const days = new Set(); state.loans.filter((loan) => selectedIds.has(loan.game_id)).forEach((loan) => { const day = new Date(`${loan.loan_date}T12:00:00`); const end = new Date(`${loan.occupied_until || loan.return_date}T12:00:00`); while (day <= end) { days.add(iso(day)); day.setDate(day.getDate() + 1); } }); return days; }
 function sameBook(loan, book) {
   if (Number(loan.book_id) === Number(book.id)) return true;
-  return ['Titre', 'Auteur', 'Lieu'].every((field) => String(loan[field] ?? '').trim() === String(book[field] ?? '').trim());
+  const normalize = (value) => String(value ?? '').normalize('NFKC').trim().replace(/\s+/g, ' ').toLocaleLowerCase('fr-FR');
+  const loanTitle = normalize(loan.Titre);
+  if (!loanTitle || loanTitle !== normalize(book.Titre)) return false;
+  return ['Auteur', 'Lieu'].every((field) => {
+    const loanValue = normalize(loan[field]);
+    const bookValue = normalize(book[field]);
+    return !loanValue || !bookValue || loanValue === bookValue;
+  });
 }
 function bookAvailabilityForDate(book, date) {
   const bookings = state.bookLoans.filter((loan) => sameBook(loan, book));
