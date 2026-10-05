@@ -4,6 +4,7 @@ const $ = (selector) => document.querySelector(selector);
 const iso = (date) => { const local = new Date(date); local.setMinutes(local.getMinutes() - local.getTimezoneOffset()); return local.toISOString().slice(0, 10); };
 const formatDate = (value) => new Intl.DateTimeFormat('fr-FR', { dateStyle: 'full' }).format(new Date(`${value}T12:00:00`));
 const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[character]);
+const normalizeSearchText = (value) => String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLocaleLowerCase('fr-FR');
 
 async function loadGames() {
   const [gamesResponse, loansResponse] = await Promise.all([fetch('/api/games'), fetch('/api/loans')]);
@@ -30,7 +31,10 @@ async function loadBooks() {
   state.bookLoans = await loansResponse.json();
   loadSchools();
   $('#series-count').textContent = `${state.books.length} série${state.books.length > 1 ? 's' : ''}`;
-  $('#series-body').innerHTML = state.books.map((book) => `<tr data-book-id="${book.id}"><td class="selection-cell"><input type="checkbox" aria-label="Sélectionner ${escapeHtml(book.Titre)}"></td><td><strong>${escapeHtml(book.Titre)}</strong></td><td>${escapeHtml(book.Auteur) || '—'}</td><td>${escapeHtml(book.Lieu) || '—'}</td><td><div class="book-quantity"><span>${escapeHtml(book.available_quantity)} disponible(s) / ${escapeHtml(book.quantity)} au total</span><input class="book-quantity-input" type="number" min="1" max="${Math.max(1, Number(book.available_quantity) || 1)}" value="1" ${Number(book.available_quantity) > 0 ? '' : 'disabled'} aria-label="Quantité demandée pour ${escapeHtml(book.Titre)}"></div></td></tr>`).join('');
+  $('#series-body').innerHTML = state.books.map((book) => `<tr data-book-id="${book.id}" data-author="${escapeHtml(book.Auteur)}"><td class="selection-cell"><input type="checkbox" aria-label="Sélectionner ${escapeHtml(book.Titre)}"></td><td><strong>${escapeHtml(book.Titre)}</strong></td><td>${escapeHtml(book.Auteur) || '—'}</td><td>${escapeHtml(book.Lieu) || '—'}</td><td><div class="book-quantity"><span>${escapeHtml(book.available_quantity)} disponible(s) / ${escapeHtml(book.quantity)} au total</span><input class="book-quantity-input" type="number" min="1" max="${Math.max(1, Number(book.available_quantity) || 1)}" value="1" ${Number(book.available_quantity) > 0 ? '' : 'disabled'} aria-label="Quantité demandée pour ${escapeHtml(book.Titre)}"></div></td></tr>`).join('');
+  const authorSearch = $('#series-author-search');
+  authorSearch.addEventListener('input', filterBooksByAuthor);
+  filterBooksByAuthor();
   document.querySelectorAll('#series-body tr').forEach((row) => {
     row.addEventListener('click', (event) => { if (!event.target.closest('input')) toggleBook(Number(row.dataset.bookId)); });
     const checkbox = row.querySelector('input[type="checkbox"]');
@@ -44,6 +48,19 @@ async function loadBooks() {
       }
     });
   });
+}
+function filterBooksByAuthor() {
+  const query = normalizeSearchText($('#series-author-search').value);
+  let visibleCount = 0;
+  document.querySelectorAll('#series-body tr').forEach((row) => {
+    const matches = !query || normalizeSearchText(row.dataset.author).includes(query);
+    row.hidden = !matches;
+    if (matches) visibleCount += 1;
+  });
+  $('#series-count').textContent = query
+    ? `${visibleCount} / ${state.books.length} séries`
+    : `${state.books.length} série${state.books.length > 1 ? 's' : ''}`;
+  $('#series-no-results').hidden = visibleCount > 0;
 }
 async function refreshBookData() {
   const selectedQuantities = new Map(state.selectedBooks.map((book) => [book.id, book.requested_quantity]));
