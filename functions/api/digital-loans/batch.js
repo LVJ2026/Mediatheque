@@ -46,7 +46,7 @@ export async function onRequestPost({ request, env }) {
       Mail_professionnel: input.professional_email,
       Ecole: input.school,
       Date_Emprunt: input.loan_date,
-      Date_Fin: input.end_date,
+      Date_Retour_prevu: input.end_date,
       Equipement: Number(item.id),
       Quantite: Number(item.quantity),
       Validee: false,
