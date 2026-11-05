@@ -214,7 +214,7 @@ function toggleEquipment(id) {
     ? state.selectedEquipment.filter((item) => item.id !== id)
     : [...state.selectedEquipment, { ...equipment, requested_quantity: 1 }];
   const today = iso(new Date());
-  if (!selected) {
+  if (!selected && state.selectedEquipment.length === 1) {
     const nextReservation = state.digitalLoans
       .filter((loan) => loan.is_active && loan.equipment_id === id && loan.return_date >= today)
       .sort((first, second) => first.loan_date.localeCompare(second.loan_date))
@@ -222,7 +222,7 @@ function toggleEquipment(id) {
       || state.digitalLoans.filter((loan) => loan.is_active && loan.equipment_id === id && loan.loan_date >= today)
         .sort((first, second) => first.loan_date.localeCompare(second.loan_date))[0];
     if (nextReservation) state.month = new Date(`${nextReservation.loan_date}T12:00:00`);
-    else if (state.selectedEquipment.length === 1) state.month = new Date();
+    else state.month = new Date();
   }
   document.querySelectorAll('#digital-body tr').forEach((itemRow) => {
     const isSelected = state.selectedEquipment.some((item) => item.id === Number(itemRow.dataset.equipmentId));
@@ -320,7 +320,7 @@ function renderDigitalCalendar() {
   for (let day = 1; day <= daysInMonth; day += 1) {
     const date = iso(new Date(year, month, day));
     const availability = state.selectedEquipment.map((equipment) => digitalAvailabilityForDate(equipment, date));
-    const unavailable = availability.some((item) => item.available < 1);
+    const unavailable = availability.every((item) => item.available < 1);
     const approved = availability.some((item) => item.approved);
     const pending = availability.some((item) => item.pending);
     const classes = ['day', approved ? 'approved' : pending ? 'pending' : '', unavailable ? 'unavailable' : '', date < today ? 'past' : '', date === today ? 'today' : ''].filter(Boolean).join(' ');
@@ -426,22 +426,27 @@ function renderDigitalQuantityFields(startDate, endDate) {
   container.hidden = !isDigital;
   if (!isDigital) return;
   const submitButton = $('#loan-form').querySelector('button[type="submit"]');
-  let noStock = false;
-  container.innerHTML = state.selectedEquipment.map((equipment) => {
-    const available = availableDigitalQuantityForPeriod(equipment, startDate, endDate);
-    if (!available) noStock = true;
-    equipment.requested_quantity = available ? Math.min(equipment.requested_quantity, available) : 1;
+  const selections = state.selectedEquipment.map((equipment) => ({
+    equipment,
+    available: availableDigitalQuantityForPeriod(equipment, startDate, endDate),
+  }));
+  const availableSelections = selections.filter((item) => item.available > 0);
+  container.innerHTML = selections.map(({ equipment, available }) => {
+    if (!available) return `<div class="book-quantity-item"><div><strong>${escapeHtml(equipment.Equipement)}</strong><span>Aucun exemplaire disponible sur cette période; cet équipement ne sera pas ajouté à la fiche.</span></div></div>`;
+    equipment.requested_quantity = Math.min(equipment.requested_quantity, available);
     return `<div class="book-quantity-item"><div><strong>${escapeHtml(equipment.Equipement)}</strong><span>Disponible sur cette période : ${available}</span></div><label>Quantité<input data-digital-quantity="${equipment.id}" type="number" min="1" max="${Math.max(1, available)}" value="${equipment.requested_quantity}" ${available ? '' : 'disabled'} required></label></div>${available ? '' : '<p class="form-error">Aucun exemplaire disponible sur cette période.</p>'}`;
   }).join('');
-  submitButton.disabled = noStock;
-  $('#loan-form').dataset.digitalSelection = JSON.stringify(state.selectedEquipment.map((item) => ({ id: item.id, quantity: item.requested_quantity })));
+  submitButton.disabled = availableSelections.length === 0;
+  const selectionPayload = () => JSON.stringify(availableSelections
+    .map(({ equipment }) => ({ id: equipment.id, quantity: equipment.requested_quantity })));
+  $('#loan-form').dataset.digitalSelection = selectionPayload();
   container.querySelectorAll('[data-digital-quantity]').forEach((input) => input.addEventListener('input', () => {
     const equipment = state.selectedEquipment.find((item) => item.id === Number(input.dataset.digitalQuantity));
     if (!equipment) return;
     const maximum = Number(input.max);
     equipment.requested_quantity = Math.min(maximum, Math.max(1, Number(input.value) || 1));
     input.value = equipment.requested_quantity;
-    $('#loan-form').dataset.digitalSelection = JSON.stringify(state.selectedEquipment.map((item) => ({ id: item.id, quantity: item.requested_quantity })));
+    $('#loan-form').dataset.digitalSelection = selectionPayload();
   }));
 }
 function openModal(date) {
