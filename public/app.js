@@ -126,19 +126,20 @@ async function refreshLoans() {
   if ((!state.games.length && !state.books.length && !state.equipment.length) || loansRefreshInFlight) return;
   loansRefreshInFlight = true;
   try {
+    if (state.equipment.length) {
+      await refreshDigitalData();
+      if (state.selectedEquipment.length) renderDigitalCalendar();
+    }
     const response = await fetch('/api/loans', { cache: 'no-store' });
-    if (!response.ok) return;
-    state.loans = await response.json();
+    if (response.ok) state.loans = await response.json();
     if (state.books.length && location.hash === '#series') {
       await refreshBookData();
     } else {
       const bookLoansResponse = await fetch('/api/book-loans', { cache: 'no-store' });
       if (bookLoansResponse.ok) state.bookLoans = await bookLoansResponse.json();
     }
-    if (state.equipment.length) await refreshDigitalData();
     if (state.selectedGames.length) renderCalendar();
     if (state.selectedBooks.length) renderSeriesCalendar();
-    if (state.selectedEquipment.length) renderDigitalCalendar();
     const manageModal = $('#manage-modal');
     if (!manageModal.hidden && manageModal.dataset.date) {
       if (loansForDate(manageModal.dataset.date).length) openManageModal(manageModal.dataset.date);
@@ -323,7 +324,7 @@ function renderDigitalCalendar() {
     const unavailable = availability.every((item) => item.available < 1);
     const approved = availability.some((item) => item.approved);
     const pending = availability.some((item) => item.pending);
-    const classes = ['day', approved ? 'approved' : pending ? 'pending' : '', unavailable ? 'unavailable' : '', date < today ? 'past' : '', date === today ? 'today' : ''].filter(Boolean).join(' ');
+    const classes = ['day', pending ? 'pending' : approved ? 'approved' : '', unavailable ? 'unavailable' : '', date < today ? 'past' : '', date === today ? 'today' : ''].filter(Boolean).join(' ');
     const disabled = date < today;
     html += `<button class="${classes}" data-date="${date}" ${disabled ? 'disabled' : ''}>${day}</button>`;
   }
