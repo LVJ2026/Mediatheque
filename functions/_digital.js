@@ -5,7 +5,7 @@ function digitalInventoryTable(env) {
 }
 
 function digitalLoansTable(env) {
-  return env.GRIST_DIGITAL_LOANS_TABLE || 'Emprunt Numerique';
+  return env.GRIST_DIGITAL_LOANS_TABLE || 'Emprunts Numeriques';
 }
 
 function digitalQuantity(fields) {
