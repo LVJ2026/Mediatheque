@@ -324,13 +324,13 @@ function renderDigitalCalendar() {
     const approved = availability.some((item) => item.approved);
     const pending = availability.some((item) => item.pending);
     const classes = ['day', approved ? 'approved' : pending ? 'pending' : '', unavailable ? 'unavailable' : '', date < today ? 'past' : '', date === today ? 'today' : ''].filter(Boolean).join(' ');
-    const disabled = date < today || (unavailable && !state.manager);
+    const disabled = date < today;
     html += `<button class="${classes}" data-date="${date}" ${disabled ? 'disabled' : ''}>${day}</button>`;
   }
   $('#digital-calendar-grid').innerHTML = html;
   document.querySelectorAll('#digital-calendar-grid .day:not(.empty)').forEach((button) => button.addEventListener('click', () => {
     if (state.manager && loansForDate(button.dataset.date).length) openManageModal(button.dataset.date);
-    else if (button.dataset.date >= today && !button.classList.contains('unavailable')) openModal(button.dataset.date);
+    else if (button.dataset.date >= today) openModal(button.dataset.date);
   }));
 }
 function seriesAvailability() {
@@ -431,6 +431,9 @@ function renderDigitalQuantityFields(startDate, endDate) {
     available: availableDigitalQuantityForPeriod(equipment, startDate, endDate),
   }));
   const availableSelections = selections.filter((item) => item.available > 0);
+  $('#modal-title').textContent = availableSelections.length
+    ? availableSelections.map(({ equipment }) => `${equipment.Equipement} × ${Math.min(equipment.requested_quantity, availableDigitalQuantityForPeriod(equipment, startDate, endDate))}`).join(' + ')
+    : 'Aucun équipement disponible aux dates choisies';
   container.innerHTML = selections.map(({ equipment, available }) => {
     if (!available) return `<div class="book-quantity-item"><div><strong>${escapeHtml(equipment.Equipement)}</strong><span>Aucun exemplaire disponible sur cette période; cet équipement ne sera pas ajouté à la fiche.</span></div></div>`;
     equipment.requested_quantity = Math.min(equipment.requested_quantity, available);
