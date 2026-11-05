@@ -605,24 +605,25 @@ function openManageModal(date) {
   $('#manage-list').innerHTML = bookings.map((booking) => {
     const resources = bookingResources(booking);
     const status = booking.collection === 'digital' ? booking.is_approved ? ' · Validée' : ' · En attente de validation' : '';
-    const approveButton = state.manager && booking.collection === 'digital' && !booking.is_approved
-      ? `<button class="primary-button manage-approve" data-approve-id="${booking.id}" type="button">Valider la pré-réservation</button>`
+    const approvalControl = state.manager && booking.collection === 'digital'
+      ? `<label class="manager-approval"><input type="checkbox" data-approve-id="${booking.id}" ${booking.is_approved ? 'checked disabled' : ''}> Validée</label>`
       : '';
     const managerActions = state.manager
       ? `<button class="secondary-button" data-return-id="${booking.id}" data-return-date="${date}" type="button">Enregistrer le retour à cette date</button><button class="danger-button" data-delete-id="${booking.id}" data-return-date="${date}" type="button">Annuler toute la réservation</button>`
       : '';
-    return `<article class="manage-item"><div><strong>${escapeHtml(resources.join(' + '))}</strong><span>${escapeHtml(booking.name)} ${escapeHtml(booking.first_name)} · du ${formatDate(booking.loan_date)} au ${formatDate(booking.return_date)}${status}</span></div><div class="manage-actions"><button class="secondary-button" data-print-id="${booking.id}" type="button">Fiche</button>${approveButton}${managerActions}</div></article>`;
+    return `<article class="manage-item"><div><strong>${escapeHtml(resources.join(' + '))}</strong><span>${escapeHtml(booking.name)} ${escapeHtml(booking.first_name)} · du ${formatDate(booking.loan_date)} au ${formatDate(booking.return_date)}${status}</span></div><div class="manage-actions">${approvalControl}<button class="secondary-button" data-print-id="${booking.id}" type="button">Fiche</button>${managerActions}</div></article>`;
   }).join('');
   $('#manage-modal').hidden = false;
   document.querySelectorAll('[data-print-id]').forEach((button) => button.addEventListener('click', () => printLoan(Number(button.dataset.printId))));
-  document.querySelectorAll('[data-approve-id]').forEach((button) => button.addEventListener('click', () => approveDigitalBooking(Number(button.dataset.approveId))));
+  document.querySelectorAll('[data-approve-id]').forEach((checkbox) => checkbox.addEventListener('change', () => approveDigitalBooking(Number(checkbox.dataset.approveId), checkbox)));
   document.querySelectorAll('[data-return-id]').forEach((button) => button.addEventListener('click', () => returnLoan(Number(button.dataset.returnId), button.dataset.returnDate)));
   document.querySelectorAll('[data-delete-id]').forEach((button) => button.addEventListener('click', () => deleteBooking(Number(button.dataset.deleteId), button.dataset.returnDate)));
 }
 function closeManageModal() { $('#manage-modal').hidden = true; }
-async function approveDigitalBooking(id) {
+async function approveDigitalBooking(id, checkbox) {
   const booking = allBookings().find((item) => item.id === id);
-  if (!booking || !confirm('Valider cette pré-réservation et envoyer un courriel de confirmation à l’emprunteur ?')) return;
+  if (!booking || !checkbox.checked) return;
+  checkbox.disabled = true;
   try {
     const response = await fetch('/api/digital-loans/approve', {
       method: 'POST',
@@ -633,12 +634,14 @@ async function approveDigitalBooking(id) {
     if (!response.ok) throw new Error(result.detail || 'La validation n’a pas pu être enregistrée dans Grist.');
     const ids = new Set(booking.ids.map(String));
     state.digitalLoans = state.digitalLoans.map((loan) => ids.has(String(loan.id)) ? { ...loan, is_approved: true } : loan);
-    closeManageModal();
     if (state.selectedEquipment.length) renderDigitalCalendar();
+    openManageModal($('#manage-modal').dataset.date);
     showToast(result.email_status === 'sent'
       ? 'Pré-réservation validée. Le courriel de confirmation a été envoyé.'
       : `Pré-réservation validée, mais le courriel n’a pas pu être envoyé : ${result.email_error || 'aucun détail reçu'}`);
   } catch (error) {
+    checkbox.checked = false;
+    checkbox.disabled = false;
     showToast(error.message || 'La validation a échoué.');
   }
 }

@@ -190,36 +190,37 @@ async function sendReminders(env, now) {
         console.error(`Échec du courriel pour ${loan.professional_email} :`, error.message);
       }
 
-      if (dueDigitalGroups.length) {
-        const equipmentById = new Map((digitalInventory.records || []).map((record) => [
-          Number(record.id), record.fields?.Equipement || `Équipement ${record.id}`,
-        ]));
-        for (const group of dueDigitalGroups) {
-          const loan = group.borrower;
-          const equipmentList = [...group.quantities]
-            .map(([id, quantity]) => `- ${equipmentById.get(id) || `Équipement ${id}`} × ${quantity}`)
-            .join('\n');
-          const isStart = group.notice === 'start';
-          try {
-            await sendMail(env, {
-              to: loan.professional_email,
-              subject: isStart
-                ? 'Votre emprunt de matériel numérique commence aujourd’hui'
-                : 'Rappel : retour de votre matériel numérique dans 3 jours',
-              text: isStart
-                ? `Bonjour ${loan.first_name} ${loan.name},\n\nVotre emprunt commence aujourd’hui pour :\n${equipmentList}\n\nLe retour est prévu le ${formatDate(loan.return_date)}.\n\nMédiathèque`
-                : `Bonjour ${loan.first_name} ${loan.name},\n\nNous vous rappelons que le retour prévu pour :\n${equipmentList}\nest le ${formatDate(loan.return_date)}.\n\nMédiathèque`,
-            });
-            const marker = isStart ? { Confirmation_Envoyee: today } : { Rappel_Envoye: today };
-            await gristRequest(env, digitalLoansTable(env), {
-              method: 'PATCH',
-              body: JSON.stringify({ records: group.records.map((record) => ({ id: record.id, fields: marker })) }),
-            });
-            console.log(`${isStart ? 'Confirmation de début' : 'Rappel'} numérique envoyé pour ${loan.professional_email} (${loan.return_date}).`);
-          } catch (error) {
-            console.error(`Échec du courriel numérique pour ${loan.professional_email} :`, error.message);
-          }
-        }
+    }
+  }
+
+  if (dueDigitalGroups.length) {
+    const equipmentById = new Map((digitalInventory.records || []).map((record) => [
+      Number(record.id), record.fields?.Equipement || `Équipement ${record.id}`,
+    ]));
+    for (const group of dueDigitalGroups) {
+      const loan = group.borrower;
+      const equipmentList = [...group.quantities]
+        .map(([id, quantity]) => `- ${equipmentById.get(id) || `Équipement ${id}`} × ${quantity}`)
+        .join('\n');
+      const isStart = group.notice === 'start';
+      try {
+        await sendMail(env, {
+          to: loan.professional_email,
+          subject: isStart
+            ? 'Votre emprunt de matériel numérique commence aujourd’hui'
+            : 'Rappel : retour de votre matériel numérique dans 3 jours',
+          text: isStart
+            ? `Bonjour ${loan.first_name} ${loan.name},\n\nVotre emprunt commence aujourd’hui pour :\n${equipmentList}\n\nLe retour est prévu le ${formatDate(loan.return_date)}.\n\nMédiathèque`
+            : `Bonjour ${loan.first_name} ${loan.name},\n\nNous vous rappelons que le retour prévu pour :\n${equipmentList}\nest le ${formatDate(loan.return_date)}.\n\nMédiathèque`,
+        });
+        const marker = isStart ? { Confirmation_Envoyee: today } : { Rappel_Envoye: today };
+        await gristRequest(env, digitalLoansTable(env), {
+          method: 'PATCH',
+          body: JSON.stringify({ records: group.records.map((record) => ({ id: record.id, fields: marker })) }),
+        });
+        console.log(`${isStart ? 'Confirmation de début' : 'Rappel'} numérique envoyé pour ${loan.professional_email} (${loan.return_date}).`);
+      } catch (error) {
+        console.error(`Échec du courriel numérique pour ${loan.professional_email} :`, error.message);
       }
     }
   }

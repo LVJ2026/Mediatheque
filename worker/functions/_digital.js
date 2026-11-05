@@ -25,7 +25,8 @@ function normalizeDigitalLoan(record, inventoryRecords = []) {
   const loanDate = toDate(fields.Date_Emprunt ?? fields['Date Emprunt']);
   const returnedDate = fields.Retour == null || fields.Retour === '' ? null : toDate(fields.Retour);
   const cancelledDate = fields.Date_Annulation == null || fields.Date_Annulation === '' ? null : toDate(fields.Date_Annulation);
-  const plannedEndDate = fields.Date_Fin == null || fields.Date_Fin === '' ? addDays(loanDate, 20) : toDate(fields.Date_Fin);
+  const plannedEnd = fields.Date_Retour_prevu ?? fields.Date_Fin ?? fields['Date retour prévu'];
+  const plannedEndDate = plannedEnd == null || plannedEnd === '' ? addDays(loanDate, 20) : toDate(plannedEnd);
   const returnDate = cancelledDate || returnedDate || plannedEndDate;
   return {
     id: Number(record.id),
