@@ -31,7 +31,7 @@ export async function onRequestPost({ request, env }) {
     if (approved.length && approved.length !== records.length) {
       return Response.json({ detail: 'Les lignes de cette fiche ont des états de validation différents.' }, { status: 409 });
     }
-    if (records.every((record) => record.fields?.Confirmation_Envoyee)) {
+    if (records.some((record) => record.fields?.Confirmation_Envoyee)) {
       return Response.json({ detail: 'Le courriel de confirmation a déjà été envoyé.' }, { status: 409 });
     }
     if (!approved.length) {
