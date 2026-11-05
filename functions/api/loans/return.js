@@ -33,9 +33,7 @@ export async function onRequestPost({ request, env, waitUntil }) {
       const totals = new Map((inventory.records || []).map((record) => [
         Number(record.id), Number(record.fields?.Quantite ?? record.fields?.['Quantité'] ?? 0),
       ]));
-      const stockSync = syncDigitalAvailability(env, totals).catch((error) => console.error('Mise à jour du stock numérique après retour impossible :', error.message));
-      if (waitUntil) waitUntil(stockSync);
-      else await stockSync;
+      await syncDigitalAvailability(env, totals);
     }
     return Response.json({ updated: records.length });
   } catch (error) {
