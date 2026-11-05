@@ -5,7 +5,7 @@ function digitalInventoryTable(env) {
 }
 
 function digitalLoansTable(env) {
-  return env.GRIST_DIGITAL_LOANS_TABLE || 'Emprunts Numeriques';
+  return env.GRIST_DIGITAL_LOANS_TABLE || 'Emprunt Numerique';
 }
 
 function digitalQuantity(fields) {
@@ -59,6 +59,7 @@ function normalizeDigitalLoan(record, inventoryRecords = []) {
     equipment_name: equipment?.fields?.Equipement || `Équipement ${equipmentId}`,
     quantity: digitalQuantity(fields),
     is_approved: fields.Validee === true || fields.Validee === 1,
+    confirmation_sent: Boolean(fields.Confirmation_Envoyee),
     is_active: !returnedDate && !cancelledDate,
     cancelled_date: cancelledDate,
     collection: 'digital',

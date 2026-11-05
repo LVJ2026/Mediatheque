@@ -23,20 +23,35 @@ export async function onRequestPost({ request, env }) {
     const ids = new Set(input.loan_ids.map(Number));
     const records = (payload.records || []).filter((record) => ids.has(Number(record.id)));
     if (records.length !== ids.size) return Response.json({ detail: 'Une pré-réservation est introuvable.' }, { status: 404 });
-    if (records.some((record) => record.fields?.Validee === true || record.fields?.Validee === 1 || record.fields?.Retour || record.fields?.Date_Annulation)) {
-      return Response.json({ detail: 'Cette pré-réservation a déjà été validée ou clôturée.' }, { status: 409 });
+    if (records.some((record) => record.fields?.Retour || record.fields?.Date_Annulation)) {
+      return Response.json({ detail: 'Cette pré-réservation est déjà clôturée.' }, { status: 409 });
     }
 
-    await gristRequest(env, digitalLoansTable(env), {
-      method: 'PATCH',
-      body: JSON.stringify({ records: records.map((record) => ({ id: record.id, fields: { Validee: true } })) }),
-    });
+    const approved = records.filter((record) => record.fields?.Validee === true || record.fields?.Validee === 1);
+    if (approved.length && approved.length !== records.length) {
+      return Response.json({ detail: 'Les lignes de cette fiche ont des états de validation différents.' }, { status: 409 });
+    }
+    if (records.every((record) => record.fields?.Confirmation_Envoyee)) {
+      return Response.json({ detail: 'Le courriel de confirmation a déjà été envoyé.' }, { status: 409 });
+    }
+    if (!approved.length) {
+      await gristRequest(env, digitalLoansTable(env), {
+        method: 'PATCH',
+        body: JSON.stringify({ records: records.map((record) => ({ id: record.id, fields: { Validee: true } })) }),
+      });
+    }
     const loans = records.map((record) => normalizeDigitalLoan({
       ...record,
       fields: { ...(record.fields || {}), Validee: true },
     }, inventory.records || []));
     const first = loans[0];
     const equipmentList = loans.map((loan) => `- ${loan.equipment_name} × ${loan.quantity}`).join('\n');
+    const dateInParis = (date) => new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Europe/Paris',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(date);
     const formatDate = (value) => new Intl.DateTimeFormat('fr-FR', {
       dateStyle: 'long',
       timeZone: 'UTC',
@@ -49,6 +64,22 @@ export async function onRequestPost({ request, env }) {
         subject: 'Confirmation de votre réservation de matériel numérique',
         text: `Bonjour ${first.first_name} ${first.name},\n\nVotre réservation est confirmée pour :\n${equipmentList}\n\nDu ${formatDate(first.loan_date)} au ${formatDate(first.return_date)}.\n\nMédiathèque`,
       });
+      let trackingStatus = 'saved';
+      try {
+        await gristRequest(env, digitalLoansTable(env), {
+          method: 'PATCH',
+          body: JSON.stringify({
+            records: records.map((record) => ({
+              id: record.id,
+              fields: { Confirmation_Envoyee: dateInParis(new Date()) },
+            })),
+          }),
+        });
+      } catch (error) {
+        trackingStatus = 'failed';
+        console.error('Courriel numérique envoyé, mais le marqueur de confirmation n’a pas été enregistré :', error.message);
+      }
+      return Response.json({ approved: records.length, email_status: 'sent', tracking_status: trackingStatus });
     } catch (error) {
       emailStatus = 'failed';
       emailError = String(error.message || 'Erreur SMTP inconnue').slice(0, 200);
