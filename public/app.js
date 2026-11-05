@@ -351,8 +351,8 @@ function seriesAvailability() {
   }
   return days;
 }
-function allBookings() { const source = state.collection === 'books' ? state.bookLoans : state.loans; const grouped = new Map(); source.forEach((loan) => { const key = [loan.name, loan.first_name, loan.professional_email, loan.school, loan.loan_date, loan.return_date, state.collection].join('\u001f'); if (!grouped.has(key)) grouped.set(key, { ...loan, collection: state.collection, ids: [], entries: [] }); const booking = grouped.get(key); booking.ids.push(loan.id); booking.entries.push(loan); }); return [...grouped.values()]; }
-function loansForDate(date) { return allBookings().filter((booking) => booking.entries.some((loan) => { const selected = state.collection === 'books' ? state.selectedBooks.some((book) => sameBook(loan, book)) : state.selectedGames.some((game) => game.id === loan.game_id); return selected && loan.loan_date <= date && date <= (loan.occupied_until || loan.return_date); })); }
+function allBookings() { const source = state.collection === 'books' ? state.bookLoans : state.collection === 'digital' ? state.digitalLoans : state.loans; const grouped = new Map(); source.forEach((loan) => { const key = [loan.name, loan.first_name, loan.professional_email, loan.school, loan.loan_date, loan.return_date, state.collection].join('\u001f'); if (!grouped.has(key)) grouped.set(key, { ...loan, collection: state.collection, ids: [], entries: [] }); const booking = grouped.get(key); booking.ids.push(loan.id); booking.entries.push(loan); }); return [...grouped.values()]; }
+function loansForDate(date) { return allBookings().filter((booking) => booking.entries.some((loan) => { const selected = state.collection === 'books' ? state.selectedBooks.some((book) => sameBook(loan, book)) : state.collection === 'digital' ? state.selectedEquipment.some((equipment) => equipment.id === loan.equipment_id) : state.selectedGames.some((game) => game.id === loan.game_id); return selected && loan.loan_date <= date && date <= (loan.occupied_until || loan.return_date); })); }
 function renderCalendar() { const year = state.month.getFullYear(); const month = state.month.getMonth(); $('#calendar-month').textContent = new Intl.DateTimeFormat('fr-FR', { month: 'long', year: 'numeric' }).format(state.month); const firstDay = (new Date(year, month, 1).getDay() + 6) % 7; const daysInMonth = new Date(year, month + 1, 0).getDate(); const today = iso(new Date()); const busy = occupiedDates(); let html = ''; for (let index = 0; index < firstDay; index += 1) html += '<button class="day empty" tabindex="-1" aria-hidden="true"></button>'; for (let day = 1; day <= daysInMonth; day += 1) { const date = iso(new Date(year, month, day)); const occupied = busy.has(date); const unavailable = occupied || date < today; const classes = ['day', occupied ? 'occupied' : '', date < today ? 'past' : '', date === today ? 'today' : ''].filter(Boolean).join(' '); const disabled = unavailable && !state.manager; html += `<button class="${classes}" data-date="${date}" ${disabled ? 'disabled' : ''}>${day}</button>`; } $('#calendar-grid').innerHTML = html; document.querySelectorAll('#calendar-grid .day:not(.empty)').forEach((button) => button.addEventListener('click', () => { if (button.classList.contains('occupied')) openManageModal(button.dataset.date); else openModal(button.dataset.date); })); }
 function renderSeriesCalendar() {
   const year = state.month.getFullYear();
@@ -420,17 +420,45 @@ function renderBookQuantityFields(startDate, endDate) {
     $('#loan-form').dataset.bookSelection = JSON.stringify(state.selectedBooks.map((item) => ({ id: item.id, quantity: item.requested_quantity })));
   }));
 }
+function renderDigitalQuantityFields(startDate, endDate) {
+  const container = $('#digital-quantity-fields');
+  const isDigital = state.collection === 'digital';
+  container.hidden = !isDigital;
+  if (!isDigital) return;
+  const submitButton = $('#loan-form').querySelector('button[type="submit"]');
+  let noStock = false;
+  container.innerHTML = state.selectedEquipment.map((equipment) => {
+    const available = availableDigitalQuantityForPeriod(equipment, startDate, endDate);
+    if (!available) noStock = true;
+    equipment.requested_quantity = available ? Math.min(equipment.requested_quantity, available) : 1;
+    return `<div class="book-quantity-item"><div><strong>${escapeHtml(equipment.Equipement)}</strong><span>Disponible sur cette période : ${available}</span></div><label>Quantité<input data-digital-quantity="${equipment.id}" type="number" min="1" max="${Math.max(1, available)}" value="${equipment.requested_quantity}" ${available ? '' : 'disabled'} required></label></div>${available ? '' : '<p class="form-error">Aucun exemplaire disponible sur cette période.</p>'}`;
+  }).join('');
+  submitButton.disabled = noStock;
+  $('#loan-form').dataset.digitalSelection = JSON.stringify(state.selectedEquipment.map((item) => ({ id: item.id, quantity: item.requested_quantity })));
+  container.querySelectorAll('[data-digital-quantity]').forEach((input) => input.addEventListener('input', () => {
+    const equipment = state.selectedEquipment.find((item) => item.id === Number(input.dataset.digitalQuantity));
+    if (!equipment) return;
+    const maximum = Number(input.max);
+    equipment.requested_quantity = Math.min(maximum, Math.max(1, Number(input.value) || 1));
+    input.value = equipment.requested_quantity;
+    $('#loan-form').dataset.digitalSelection = JSON.stringify(state.selectedEquipment.map((item) => ({ id: item.id, quantity: item.requested_quantity })));
+  }));
+}
 function openModal(date) {
   const form = $('#loan-form');
   const startInput = $('#loan-start-date');
   const endInput = $('#loan-end-date');
   $('#modal-title').textContent = state.collection === 'books'
     ? state.selectedBooks.map((item) => `${item.Titre} × ${item.requested_quantity}`).join(' + ')
-    : state.selectedGames.map((item) => item.Jeu).join(' + ');
+    : state.collection === 'digital'
+      ? state.selectedEquipment.map((item) => `${item.Equipement} × ${item.requested_quantity}`).join(' + ')
+      : state.selectedGames.map((item) => item.Jeu).join(' + ');
   form.dataset.gameIds = JSON.stringify(state.selectedGames.map((item) => item.id));
   form.dataset.bookSelection = JSON.stringify(state.selectedBooks.map((item) => ({ id: item.id, quantity: item.requested_quantity })));
+  form.dataset.digitalSelection = JSON.stringify(state.selectedEquipment.map((item) => ({ id: item.id, quantity: item.requested_quantity })));
   form.dataset.collection = state.collection;
   form.reset();
+  $('#loan-modal-eyebrow').textContent = state.collection === 'digital' ? 'Pré-réservation soumise à validation' : 'Nouvelle réservation';
   startInput.value = date;
   endInput.value = iso(new Date(new Date(`${date}T12:00:00`).getTime() + 20 * 86400000));
   const updateDates = () => {
@@ -442,6 +470,7 @@ function openModal(date) {
     if (endInput.value < startInput.value) endInput.value = startInput.value;
     $('#modal-date').textContent = `Du ${formatDate(startInput.value)} au ${formatDate(endInput.value)}`;
     renderBookQuantityFields(startInput.value, endInput.value);
+    renderDigitalQuantityFields(startInput.value, endInput.value);
   };
   startInput.onchange = updateDates;
   endInput.onchange = updateDates;
@@ -458,15 +487,22 @@ async function submitLoan(event) {
   const data = Object.fromEntries(new FormData(form));
   const gameIds = JSON.parse(form.dataset.gameIds);
   const bookSelection = JSON.parse(form.dataset.bookSelection || '[]');
+  const digitalSelection = JSON.parse(form.dataset.digitalSelection || '[]');
   const isBooks = form.dataset.collection === 'books';
+  const isDigital = form.dataset.collection === 'digital';
   const loanDate = data.loan_date;
   const endDate = data.end_date;
   const summary = isBooks
     ? bookSelection.map((item) => `${state.books.find((book) => book.id === item.id)?.Titre || 'Série'} × ${item.quantity}`).join(', ')
-    : `${gameIds.length} jeu${gameIds.length > 1 ? 'x' : ''}`;
-  if (!confirm(`Confirmer la réservation de ${summary} du ${formatDate(loanDate)} au ${formatDate(endDate)} ?`)) return;
+    : isDigital
+      ? digitalSelection.map((item) => `${state.equipment.find((equipment) => equipment.id === item.id)?.Equipement || 'Équipement'} × ${item.quantity}`).join(', ')
+      : `${gameIds.length} jeu${gameIds.length > 1 ? 'x' : ''}`;
+  const bookingType = isDigital ? 'la pré-réservation' : 'la réservation';
+  if (!confirm(`Confirmer ${bookingType} de ${summary} du ${formatDate(loanDate)} au ${formatDate(endDate)} ?`)) return;
   const printWindow = window.open('', '_blank');
-  const response = await fetch(isBooks ? '/api/book-loans/batch' : '/api/loans/batch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(isBooks ? { ...data, books: bookSelection } : { ...data, game_ids: gameIds }) });
+  const endpoint = isBooks ? '/api/book-loans/batch' : isDigital ? '/api/digital-loans/batch' : '/api/loans/batch';
+  const payload = isBooks ? { ...data, books: bookSelection } : isDigital ? { ...data, equipment: digitalSelection } : { ...data, game_ids: gameIds };
+  const response = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
   const result = await response.json();
   if (!response.ok) {
     printWindow?.close();
@@ -474,7 +510,12 @@ async function submitLoan(event) {
     return;
   }
   const returnDate = result[0]?.return_date || endDate;
-  if (printWindow) printSheet('Fiche d’emprunt', data, isBooks ? bookSelection.map((item) => `${state.books.find((book) => book.id === item.id)?.Titre || 'Série'} × ${item.quantity}`) : state.selectedGames, loanDate, returnDate, printWindow);
+  const resources = isBooks
+    ? bookSelection.map((item) => `${state.books.find((book) => book.id === item.id)?.Titre || 'Série'} × ${item.quantity}`)
+    : isDigital
+      ? digitalSelection.map((item) => `${state.equipment.find((equipment) => equipment.id === item.id)?.Equipement || 'Équipement'} × ${item.quantity}`)
+      : state.selectedGames;
+  if (printWindow) printSheet(isDigital ? 'Fiche de pré-réservation' : 'Fiche d’emprunt', data, resources, loanDate, returnDate, printWindow);
   if (isBooks) {
     state.bookLoans.push(...result);
     closeModal();
@@ -482,6 +523,12 @@ async function submitLoan(event) {
     refreshBookData()
       .then(renderSeriesCalendar)
       .catch((error) => console.error('Actualisation du stock après réservation impossible :', error));
+  } else if (isDigital) {
+    state.digitalLoans.push(...result);
+    closeModal();
+    renderDigitalCalendar();
+    clearEquipmentSelection();
+    refreshDigitalData().catch((error) => console.error('Actualisation du stock numérique après pré-réservation impossible :', error));
   } else {
     state.loans.push(...result);
     closeModal();
@@ -490,6 +537,7 @@ async function submitLoan(event) {
   }
   const emailStatus = response.headers.get('X-Email-Status');
   const emailError = response.headers.get('X-Email-Error');
+  const stockStatus = response.headers.get('X-Stock-Status');
   const printStatus = printWindow ? 'La fiche est prête à imprimer en PDF.' : 'Autorisez les fenêtres surgissantes pour imprimer la fiche.';
   const emailMessage = emailStatus === 'sending'
     ? 'Le courriel de confirmation est en cours d’envoi.'
@@ -498,7 +546,9 @@ async function submitLoan(event) {
     : emailStatus === 'sent'
       ? 'Le courriel de confirmation a été envoyé.'
       : `Échec du courriel : ${emailError ? decodeURIComponent(emailError) : 'aucun détail reçu'}.`;
-  showToast(`Réservation enregistrée. ${printStatus} ${emailMessage}`);
+  showToast(isDigital
+    ? `Pré-réservation enregistrée. Elle sera visible en orange jusqu’à validation par le gestionnaire. ${stockStatus === 'failed' ? 'Attention : la mise à jour du stock Grist a échoué.' : ''} ${printStatus}`
+    : `Réservation enregistrée. ${printStatus} ${emailMessage}`);
 }
 function syncManagerButtons() { $('#manager-button').hidden = state.manager; $('#logout-manager').hidden = !state.manager; }
 window.addEventListener('hashchange', syncManagerButtons);
