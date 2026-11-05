@@ -1,4 +1,4 @@
-const state = { games: [], loans: [], selectedGames: [], books: [], bookLoans: [], selectedBooks: [], collection: 'games', month: new Date(), manager: false };
+const state = { games: [], loans: [], selectedGames: [], books: [], bookLoans: [], selectedBooks: [], equipment: [], digitalLoans: [], selectedEquipment: [], collection: 'games', month: new Date(), manager: false };
 let loansRefreshInFlight = false;
 const $ = (selector) => document.querySelector(selector);
 const iso = (date) => { const local = new Date(date); local.setMinutes(local.getMinutes() - local.getTimezoneOffset()); return local.toISOString().slice(0, 10); };
@@ -16,6 +16,41 @@ async function loadGames() {
   $('#game-count').textContent = `${state.games.length} jeu${state.games.length > 1 ? 'x' : ''}`;
   $('#games-body').innerHTML = state.games.map((game) => `<tr data-game-id="${game.id}"><td class="selection-cell"><input type="checkbox" aria-label="Sélectionner ${escapeHtml(game.Jeu)}"></td><td><strong>${escapeHtml(game.Jeu)}</strong></td><td>${escapeHtml(game.Marque) || '—'}</td><td>${escapeHtml(game['Âge indiqué']) || '—'}</td><td>${escapeHtml(game.Joueurs) || '—'}</td><td>${escapeHtml(game.Remarques) || '—'}</td></tr>`).join('');
   document.querySelectorAll('#games-body tr').forEach((row) => { row.addEventListener('click', () => toggleGame(Number(row.dataset.gameId))); const checkbox = row.querySelector('input'); checkbox.addEventListener('click', (event) => event.stopPropagation()); checkbox.addEventListener('change', () => toggleGame(Number(row.dataset.gameId))); });
+}
+async function loadDigital() {
+  const [inventoryResponse, loansResponse] = await Promise.all([
+    fetch('/api/digital-equipment', { cache: 'no-store' }),
+    fetch('/api/digital-loans', { cache: 'no-store' }),
+  ]);
+  if (!inventoryResponse.ok || !loansResponse.ok) {
+    const failedResponse = !loansResponse.ok ? loansResponse : inventoryResponse;
+    const detail = await failedResponse.json().catch(() => ({}));
+    throw new Error(detail.detail || 'Impossible de charger l’inventaire et les pré-réservations numériques.');
+  }
+  state.equipment = await inventoryResponse.json();
+  state.digitalLoans = await loansResponse.json();
+  loadSchools();
+  $('#digital-count').textContent = `${state.equipment.length} équipement${state.equipment.length > 1 ? 's' : ''}`;
+  $('#digital-body').innerHTML = state.equipment.map((item) => `<tr data-equipment-id="${item.id}"><td class="selection-cell"><input type="checkbox" aria-label="Sélectionner ${escapeHtml(item.Equipement)}"></td><td><strong>${escapeHtml(item.Equipement)}</strong></td><td>${escapeHtml(item.Marque) || '—'}</td><td>${escapeHtml(item.Type) || '—'}</td><td>${escapeHtml(item.quantity)}</td><td class="digital-remaining">${escapeHtml(item.available_quantity)}</td></tr>`).join('');
+  document.querySelectorAll('#digital-body tr').forEach((row) => {
+    row.addEventListener('click', (event) => { if (!event.target.closest('input')) toggleEquipment(Number(row.dataset.equipmentId)); });
+    const checkbox = row.querySelector('input[type="checkbox"]');
+    checkbox.addEventListener('click', (event) => event.stopPropagation());
+    checkbox.addEventListener('change', () => toggleEquipment(Number(row.dataset.equipmentId)));
+  });
+}
+async function refreshDigitalData() {
+  const [inventoryResponse, loansResponse] = await Promise.all([
+    fetch('/api/digital-equipment', { cache: 'no-store' }),
+    fetch('/api/digital-loans', { cache: 'no-store' }),
+  ]);
+  if (!inventoryResponse.ok || !loansResponse.ok) throw new Error('Impossible d’actualiser le stock numérique.');
+  state.equipment = await inventoryResponse.json();
+  state.digitalLoans = await loansResponse.json();
+  document.querySelectorAll('#digital-body tr').forEach((row) => {
+    const item = state.equipment.find((equipment) => equipment.id === Number(row.dataset.equipmentId));
+    if (item) row.querySelector('.digital-remaining').textContent = item.available_quantity;
+  });
 }
 async function loadBooks() {
   const [booksResponse, loansResponse] = await Promise.all([
@@ -88,7 +123,7 @@ async function refreshBookData() {
   });
 }
 async function refreshLoans() {
-  if ((!state.games.length && !state.books.length) || loansRefreshInFlight) return;
+  if ((!state.games.length && !state.books.length && !state.equipment.length) || loansRefreshInFlight) return;
   loansRefreshInFlight = true;
   try {
     const response = await fetch('/api/loans', { cache: 'no-store' });
@@ -100,8 +135,10 @@ async function refreshLoans() {
       const bookLoansResponse = await fetch('/api/book-loans', { cache: 'no-store' });
       if (bookLoansResponse.ok) state.bookLoans = await bookLoansResponse.json();
     }
+    if (state.equipment.length) await refreshDigitalData();
     if (state.selectedGames.length) renderCalendar();
     if (state.selectedBooks.length) renderSeriesCalendar();
+    if (state.selectedEquipment.length) renderDigitalCalendar();
     const manageModal = $('#manage-modal');
     if (!manageModal.hidden && manageModal.dataset.date) {
       if (loansForDate(manageModal.dataset.date).length) openManageModal(manageModal.dataset.date);
@@ -168,6 +205,37 @@ function toggleBook(id) {
     renderSeriesCalendar();
   }
 }
+function toggleEquipment(id) {
+  const equipment = state.equipment.find((item) => item.id === id);
+  if (!equipment) return;
+  const selected = state.selectedEquipment.some((item) => item.id === id);
+  const row = document.querySelector(`#digital-body tr[data-equipment-id="${id}"]`);
+  state.selectedEquipment = selected
+    ? state.selectedEquipment.filter((item) => item.id !== id)
+    : [...state.selectedEquipment, { ...equipment, requested_quantity: 1 }];
+  const today = iso(new Date());
+  if (!selected) {
+    const nextReservation = state.digitalLoans
+      .filter((loan) => loan.is_active && loan.equipment_id === id && loan.return_date >= today)
+      .sort((first, second) => first.loan_date.localeCompare(second.loan_date))
+      .find((loan) => loan.loan_date <= today && today <= loan.occupied_until)
+      || state.digitalLoans.filter((loan) => loan.is_active && loan.equipment_id === id && loan.loan_date >= today)
+        .sort((first, second) => first.loan_date.localeCompare(second.loan_date))[0];
+    if (nextReservation) state.month = new Date(`${nextReservation.loan_date}T12:00:00`);
+    else if (state.selectedEquipment.length === 1) state.month = new Date();
+  }
+  document.querySelectorAll('#digital-body tr').forEach((itemRow) => {
+    const isSelected = state.selectedEquipment.some((item) => item.id === Number(itemRow.dataset.equipmentId));
+    itemRow.classList.toggle('selected', isSelected);
+    itemRow.querySelector('input[type="checkbox"]').checked = isSelected;
+  });
+  $('#digital-empty-calendar').hidden = state.selectedEquipment.length > 0;
+  $('#digital-calendar-content').hidden = state.selectedEquipment.length === 0;
+  if (state.selectedEquipment.length) {
+    $('#digital-selected').textContent = state.selectedEquipment.map((item) => item.Equipement).join(' + ');
+    renderDigitalCalendar();
+  }
+}
 function clearGameSelection() {
   state.selectedGames = [];
   document.querySelectorAll('#games-body tr').forEach((row) => {
@@ -185,6 +253,15 @@ function clearBookSelection() {
   });
   $('#series-empty-calendar').hidden = false;
   $('#series-calendar-content').hidden = true;
+}
+function clearEquipmentSelection() {
+  state.selectedEquipment = [];
+  document.querySelectorAll('#digital-body tr').forEach((row) => {
+    row.classList.remove('selected');
+    row.querySelector('input[type="checkbox"]').checked = false;
+  });
+  $('#digital-empty-calendar').hidden = false;
+  $('#digital-calendar-content').hidden = true;
 }
 function occupiedDates() { const selectedIds = new Set(state.selectedGames.map((game) => game.id)); const days = new Set(); state.loans.filter((loan) => selectedIds.has(loan.game_id)).forEach((loan) => { const day = new Date(`${loan.loan_date}T12:00:00`); const end = new Date(`${loan.occupied_until || loan.return_date}T12:00:00`); while (day <= end) { days.add(iso(day)); day.setDate(day.getDate() + 1); } }); return days; }
 function sameBook(loan, book) {
@@ -207,6 +284,54 @@ function bookAvailabilityForDate(book, date) {
     .filter((loan) => loan.loan_date <= date && date <= (loan.occupied_until || loan.return_date))
     .reduce((sum, loan) => sum + loan.quantity, 0);
   return { total, available: Math.max(0, total - reserved) };
+}
+function digitalAvailabilityForDate(equipment, date) {
+  const bookings = state.digitalLoans.filter((loan) => loan.equipment_id === equipment.id
+    && loan.loan_date <= date && date <= (loan.occupied_until || loan.return_date));
+  const total = Math.max(0, Number(equipment.quantity) || 0);
+  const reserved = bookings.reduce((sum, loan) => sum + loan.quantity, 0);
+  return {
+    total,
+    available: Math.max(0, total - reserved),
+    approved: bookings.some((loan) => loan.is_approved),
+    pending: bookings.some((loan) => !loan.is_approved),
+  };
+}
+function availableDigitalQuantityForPeriod(equipment, startDate, endDate) {
+  const bookings = state.digitalLoans.filter((loan) => loan.equipment_id === equipment.id
+    && loan.loan_date <= endDate && (loan.occupied_until || loan.return_date) >= startDate);
+  const changeDates = new Set([startDate]);
+  for (const loan of bookings) {
+    if (loan.loan_date > startDate && loan.loan_date <= endDate) changeDates.add(loan.loan_date);
+    const nextAvailable = iso(new Date(new Date(`${loan.occupied_until || loan.return_date}T12:00:00`).getTime() + 86400000));
+    if (nextAvailable > startDate && nextAvailable <= endDate) changeDates.add(nextAvailable);
+  }
+  return Math.min(...[...changeDates].map((date) => digitalAvailabilityForDate(equipment, date).available));
+}
+function renderDigitalCalendar() {
+  const year = state.month.getFullYear();
+  const month = state.month.getMonth();
+  $('#digital-calendar-month').textContent = new Intl.DateTimeFormat('fr-FR', { month: 'long', year: 'numeric' }).format(state.month);
+  const firstDay = (new Date(year, month, 1).getDay() + 6) % 7;
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const today = iso(new Date());
+  let html = '';
+  for (let index = 0; index < firstDay; index += 1) html += '<button class="day empty" tabindex="-1" aria-hidden="true"></button>';
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    const date = iso(new Date(year, month, day));
+    const availability = state.selectedEquipment.map((equipment) => digitalAvailabilityForDate(equipment, date));
+    const unavailable = availability.some((item) => item.available < 1);
+    const approved = availability.some((item) => item.approved);
+    const pending = availability.some((item) => item.pending);
+    const classes = ['day', approved ? 'occupied' : pending ? 'pending' : '', unavailable ? 'unavailable' : '', date < today ? 'past' : '', date === today ? 'today' : ''].filter(Boolean).join(' ');
+    const disabled = date < today || (unavailable && !state.manager);
+    html += `<button class="${classes}" data-date="${date}" ${disabled ? 'disabled' : ''}>${day}</button>`;
+  }
+  $('#digital-calendar-grid').innerHTML = html;
+  document.querySelectorAll('#digital-calendar-grid .day:not(.empty)').forEach((button) => button.addEventListener('click', () => {
+    if (state.manager && loansForDate(button.dataset.date).length) openManageModal(button.dataset.date);
+    else if (!button.classList.contains('unavailable')) openModal(button.dataset.date);
+  }));
 }
 function seriesAvailability() {
   const days = new Map();

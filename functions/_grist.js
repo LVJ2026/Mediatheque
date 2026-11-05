@@ -110,4 +110,4 @@ function normalizeBookLoan(record, inventoryRecords = []) {
   };
 }
 
-export { addDays, assertConfigured, gristRequest, normalizeBook, normalizeBookLoan, normalizeGame, normalizeLoan };
+export { addDays, assertConfigured, gristRequest, normalizeBook, normalizeBookLoan, normalizeGame, normalizeLoan, toDate };
