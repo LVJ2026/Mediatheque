@@ -112,7 +112,7 @@ async function sendReminders(env, now) {
     .concat([...bookReturns.values()].map((group) => ({ ...group, notice: 'return' })));
   for (const record of digitalPayload.records || []) {
     const fields = record.fields || {};
-    if (fields.Validee !== true || hasDate(fields.Retour) || hasDate(fields.Date_Annulation)) continue;
+    if (!(fields.Validee === true || fields.Validee === 1) || hasDate(fields.Retour) || hasDate(fields.Date_Annulation)) continue;
     const loan = normalizeDigitalLoan(record, digitalInventory.records || []);
     const key = reminderKey(loan);
     const addToGroup = (groupsByNotice, notice) => {

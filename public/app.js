@@ -330,7 +330,7 @@ function renderDigitalCalendar() {
   $('#digital-calendar-grid').innerHTML = html;
   document.querySelectorAll('#digital-calendar-grid .day:not(.empty)').forEach((button) => button.addEventListener('click', () => {
     if (state.manager && loansForDate(button.dataset.date).length) openManageModal(button.dataset.date);
-    else if (!button.classList.contains('unavailable')) openModal(button.dataset.date);
+    else if (button.dataset.date >= today && !button.classList.contains('unavailable')) openModal(button.dataset.date);
   }));
 }
 function seriesAvailability() {
@@ -563,6 +563,7 @@ async function logoutManager() {
   $('#home-view').hidden = false;
   $('#games-view').hidden = true;
   $('#series-view').hidden = true;
+  $('#digital-view').hidden = true;
   if (location.hash !== '#home') location.hash = '#home';
   try { clearGameSelection(); } catch (error) { console.error('Nettoyage de la sélection des jeux impossible :', error); }
   try { clearBookSelection(); } catch (error) { console.error('Nettoyage de la sélection des séries impossible :', error); }
@@ -632,9 +633,101 @@ async function approveDigitalBooking(id) {
     showToast(error.message || 'La validation a échoué.');
   }
 }
-async function returnLoan(id, date) { const booking = allBookings().find((item) => item.id === id); if (!booking || !confirm(`Annuler uniquement cette réservation à partir du ${formatDate(date)} ? Les autres réservations, y compris futures, restent inchangées.`)) return; const printWindow = window.open('', '_blank'); try { const response = await fetch('/api/loans/return', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ loan_ids: booking.ids.map(Number), return_date: date, collection: booking.collection }) }); const result = await response.json(); if (!response.ok) throw new Error(result.detail || 'La date de retour n’a pas pu être enregistrée dans Grist.'); } catch (error) { printWindow?.close(); showToast(error.message || 'La date de retour n’a pas pu être enregistrée dans Grist.'); return; } const occupiedUntil = iso(new Date(new Date(`${date}T12:00:00`).getTime() - 86400000)); const ids = new Set(booking.ids.map(String)); const source = booking.collection === 'books' ? state.bookLoans : state.loans; const updated = source.map((loan) => ids.has(String(loan.id)) ? { ...loan, return_date: date, occupied_until: occupiedUntil } : loan); if (booking.collection === 'books') state.bookLoans = updated; else state.loans = updated; const resources = booking.entries.map((loan) => booking.collection === 'books' ? `${state.books.find((book) => book.id === loan.book_id)?.Titre || 'Série'} × ${loan.quantity}` : state.games.find((game) => game.id === loan.game_id)?.Jeu || 'Jeu'); closeManageModal(); if (booking.collection === 'books') renderSeriesCalendar(); else renderCalendar(); if (printWindow) printSheet('Fiche de retour', booking, resources, booking.loan_date, date, printWindow); showToast(`Retour enregistré dans Grist.${printWindow ? ' Fiche prête à imprimer en PDF.' : ''}`); }
-async function deleteBooking(id, returnDate) { const booking = allBookings().find((item) => item.id === id); if (!booking || !confirm('Annuler toute cette réservation ? Les autres réservations, y compris futures, restent inchangées.')) return; const printWindow = window.open('', '_blank'); try { const response = await fetch('/api/loans/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ loan_ids: booking.ids.map(Number), cancelled_date: returnDate, collection: booking.collection }) }); const result = await response.json(); if (!response.ok) throw new Error(result.detail || 'L’annulation n’a pas pu être enregistrée dans Grist.'); } catch (error) { printWindow?.close(); showToast(error.message || 'L’annulation n’a pas pu être enregistrée dans Grist.'); return; } const removedIds = new Set(booking.ids.map(String)); if (booking.collection === 'books') state.bookLoans = state.bookLoans.filter((loan) => !removedIds.has(String(loan.id))); else state.loans = state.loans.filter((loan) => !removedIds.has(String(loan.id))); closeManageModal(); if (booking.collection === 'books') renderSeriesCalendar(); else renderCalendar(); const resources = booking.entries.map((loan) => booking.collection === 'books' ? `${state.books.find((book) => book.id === loan.book_id)?.Titre || 'Série'} × ${loan.quantity}` : state.games.find((game) => game.id === loan.game_id)?.Jeu || 'Jeu'); if (printWindow) printSheet('Fiche de retour', booking, resources, booking.loan_date, returnDate, printWindow); showToast('Annulation enregistrée dans Grist.'); }
-function printLoan(id) { const booking = allBookings().find((item) => item.id === id); if (!booking) return; const resources = booking.entries.map((loan) => booking.collection === 'books' ? `${state.books.find((book) => book.id === loan.book_id)?.Titre || 'Série'} × ${loan.quantity}` : state.games.find((game) => game.id === loan.game_id)?.Jeu || 'Jeu'); printSheet('Fiche d’emprunt', booking, resources, booking.loan_date, booking.return_date); }
+async function returnLoan(id, date) {
+  const booking = allBookings().find((item) => item.id === id);
+  if (!booking || !confirm(`Enregistrer le retour de cette réservation à partir du ${formatDate(date)} ?`)) return;
+  const printWindow = window.open('', '_blank');
+  try {
+    const response = await fetch('/api/loans/return', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ loan_ids: booking.ids.map(Number), return_date: date, collection: booking.collection }),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.detail || 'La date de retour n’a pas pu être enregistrée dans Grist.');
+  } catch (error) {
+    printWindow?.close();
+    showToast(error.message || 'La date de retour n’a pas pu être enregistrée dans Grist.');
+    return;
+  }
+  const occupiedUntil = iso(new Date(new Date(`${date}T12:00:00`).getTime() - 86400000));
+  const ids = new Set(booking.ids.map(String));
+  const source = booking.collection === 'books' ? state.bookLoans : booking.collection === 'digital' ? state.digitalLoans : state.loans;
+  const updated = source.map((loan) => ids.has(String(loan.id))
+    ? { ...loan, return_date: date, occupied_until: occupiedUntil, is_active: false }
+    : loan);
+  if (booking.collection === 'books') state.bookLoans = updated;
+  else if (booking.collection === 'digital') state.digitalLoans = updated;
+  else state.loans = updated;
+  const resources = bookingResources(booking);
+  closeManageModal();
+  if (booking.collection === 'books') renderSeriesCalendar();
+  else if (booking.collection === 'digital') renderDigitalCalendar();
+  else renderCalendar();
+  if (printWindow) printSheet('Fiche de retour', booking, resources, booking.loan_date, date, printWindow);
+  if (booking.collection === 'digital') refreshDigitalData().catch((error) => console.error('Actualisation du stock numérique après retour impossible :', error));
+  showToast(`Retour enregistré dans Grist.${printWindow ? ' Fiche prête à imprimer en PDF.' : ''}`);
+}
+async function deleteBooking(id, returnDate) {
+  const booking = allBookings().find((item) => item.id === id);
+  if (!booking || !confirm('Annuler toute cette réservation ?')) return;
+  const printWindow = window.open('', '_blank');
+  try {
+    const response = await fetch('/api/loans/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ loan_ids: booking.ids.map(Number), cancelled_date: returnDate, collection: booking.collection }),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.detail || 'L’annulation n’a pas pu être enregistrée dans Grist.');
+  } catch (error) {
+    printWindow?.close();
+    showToast(error.message || 'L’annulation n’a pas pu être enregistrée dans Grist.');
+    return;
+  }
+  const removedIds = new Set(booking.ids.map(String));
+  if (booking.collection === 'books') state.bookLoans = state.bookLoans.filter((loan) => !removedIds.has(String(loan.id)));
+  else if (booking.collection === 'digital') state.digitalLoans = state.digitalLoans.filter((loan) => !removedIds.has(String(loan.id)));
+  else state.loans = state.loans.filter((loan) => !removedIds.has(String(loan.id)));
+  closeManageModal();
+  if (booking.collection === 'books') renderSeriesCalendar();
+  else if (booking.collection === 'digital') renderDigitalCalendar();
+  else renderCalendar();
+  const resources = bookingResources(booking);
+  if (printWindow) printSheet('Fiche de retour', booking, resources, booking.loan_date, returnDate, printWindow);
+  if (booking.collection === 'digital') refreshDigitalData().catch((error) => console.error('Actualisation du stock numérique après annulation impossible :', error));
+  showToast('Annulation enregistrée dans Grist.');
+}
+function printLoan(id) {
+  const booking = allBookings().find((item) => item.id === id);
+  if (!booking) return;
+  printSheet(booking.collection === 'digital' && !booking.is_approved ? 'Fiche de pré-réservation' : 'Fiche d’emprunt',
+    booking, bookingResources(booking), booking.loan_date, booking.return_date);
+}
 function printSheet(title, borrower, resources, loanDate, returnDate, printWindow = window.open('', '_blank')) { if (!printWindow) return; const resourceList = resources.map((resource) => `<li>${escapeHtml(typeof resource === 'string' ? resource : resource.Jeu)}</li>`).join(''); printWindow.document.open(); printWindow.document.write(`<title>${escapeHtml(title)}</title><style>body{font:16px Arial;max-width:680px;margin:50px auto;color:#182c28}h1{font-size:28px;border-bottom:2px solid #18734a;padding-bottom:14px}h2{font-size:18px;margin-top:32px}p{margin:18px 0}strong{display:block;font-size:12px;text-transform:uppercase;color:#18734a;margin-bottom:5px}li{margin:8px 0}.print-action{border:0;background:#18734a;color:#fff;padding:12px 18px;font:bold 14px Arial;cursor:pointer}@media print{body{margin:20mm auto}.print-action{display:none}}</style><button class="print-action" type="button" onclick="window.print()">Imprimer cette fiche</button><h1>${escapeHtml(title)}</h1><p><strong>Nom</strong>${escapeHtml(borrower.name)}</p><p><strong>Prénom</strong>${escapeHtml(borrower.first_name)}</p><p><strong>Mail professionnel</strong>${escapeHtml(borrower.professional_email)}</p><p><strong>École</strong>${escapeHtml(borrower.school)}</p><h2>Ressources empruntées</h2><ul>${resourceList}</ul><p><strong>Date d’emprunt</strong>${formatDate(loanDate)}</p><p><strong>Date de retour</strong>${formatDate(returnDate)}</p>`); printWindow.document.close(); window.focus(); }
-function route() { const games = location.hash === '#jeux'; const books = location.hash === '#series'; state.collection = books ? 'books' : 'games'; $('#home-view').hidden = games || books; $('#games-view').hidden = !games; $('#series-view').hidden = !books; if (games && !state.games.length) loadGames().catch((error) => { $('#games-body').innerHTML = `<tr><td colspan="6" class="loading">${escapeHtml(error.message)}</td></tr>`; }); if (books && !state.books.length) loadBooks().catch((error) => { $('#series-body').innerHTML = `<tr><td colspan="5" class="loading">${escapeHtml(error.message)}</td></tr>`; }); else if (books) refreshBookData().then(() => { if (state.selectedBooks.length) renderSeriesCalendar(); }).catch((error) => console.error('Actualisation des séries impossible :', error)); }
-window.addEventListener('hashchange', route); window.addEventListener('focus', refreshLoansWhenVisible); document.addEventListener('visibilitychange', refreshLoansWhenVisible); setInterval(refreshLoansWhenVisible, 15000); $('#previous-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() - 1); renderCalendar(); }); $('#next-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() + 1); renderCalendar(); }); $('#series-previous-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() - 1); renderSeriesCalendar(); }); $('#series-next-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() + 1); renderSeriesCalendar(); }); $('#close-modal').addEventListener('click', closeModal); $('#loan-modal').addEventListener('click', (event) => { if (event.target.id === 'loan-modal') closeModal(); }); $('#loan-form').addEventListener('submit', submitLoan); $('#manager-button').addEventListener('click', openManagerModal); $('#manager-modal').addEventListener('click', (event) => { if (event.target.id === 'manager-modal') closeManagerModal(); }); $('#close-manager-modal').addEventListener('click', closeManagerModal); $('#manager-form').addEventListener('submit', loginManager); $('#manage-modal').addEventListener('click', (event) => { if (event.target.id === 'manage-modal') closeManageModal(); }); $('#close-manage-modal').addEventListener('click', closeManageModal); document.addEventListener('keydown', (event) => { if (event.key === 'Escape') { if (!$('#loan-modal').hidden) closeModal(); if (!$('#manager-modal').hidden) closeManagerModal(); if (!$('#manage-modal').hidden) closeManageModal(); } }); route();
+function route() {
+  const games = location.hash === '#jeux';
+  const books = location.hash === '#series';
+  const digital = location.hash === '#numerique';
+  state.collection = digital ? 'digital' : books ? 'books' : 'games';
+  $('#home-view').hidden = games || books || digital;
+  $('#games-view').hidden = !games;
+  $('#series-view').hidden = !books;
+  $('#digital-view').hidden = !digital;
+  if (games && !state.games.length) loadGames().catch((error) => {
+    $('#games-body').innerHTML = `<tr><td colspan="6" class="loading">${escapeHtml(error.message)}</td></tr>`;
+  });
+  if (books && !state.books.length) loadBooks().catch((error) => {
+    $('#series-body').innerHTML = `<tr><td colspan="5" class="loading">${escapeHtml(error.message)}</td></tr>`;
+  });
+  else if (books) refreshBookData().then(() => {
+    if (state.selectedBooks.length) renderSeriesCalendar();
+  }).catch((error) => console.error('Actualisation des séries impossible :', error));
+  if (digital && !state.equipment.length) loadDigital().catch((error) => {
+    $('#digital-body').innerHTML = `<tr><td colspan="6" class="loading">${escapeHtml(error.message)}</td></tr>`;
+  });
+  else if (digital) refreshDigitalData().then(() => {
+    if (state.selectedEquipment.length) renderDigitalCalendar();
+  }).catch((error) => console.error('Actualisation du matériel numérique impossible :', error));
+}
+window.addEventListener('hashchange', route); window.addEventListener('focus', refreshLoansWhenVisible); document.addEventListener('visibilitychange', refreshLoansWhenVisible); setInterval(refreshLoansWhenVisible, 15000); $('#previous-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() - 1); renderCalendar(); }); $('#next-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() + 1); renderCalendar(); }); $('#series-previous-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() - 1); renderSeriesCalendar(); }); $('#series-next-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() + 1); renderSeriesCalendar(); }); $('#digital-previous-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() - 1); renderDigitalCalendar(); }); $('#digital-next-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() + 1); renderDigitalCalendar(); }); $('#close-modal').addEventListener('click', closeModal); $('#loan-modal').addEventListener('click', (event) => { if (event.target.id === 'loan-modal') closeModal(); }); $('#loan-form').addEventListener('submit', submitLoan); $('#manager-button').addEventListener('click', openManagerModal); $('#manager-modal').addEventListener('click', (event) => { if (event.target.id === 'manager-modal') closeManagerModal(); }); $('#close-manager-modal').addEventListener('click', closeManagerModal); $('#manager-form').addEventListener('submit', loginManager); $('#manage-modal').addEventListener('click', (event) => { if (event.target.id === 'manage-modal') closeManageModal(); }); $('#close-manage-modal').addEventListener('click', closeManageModal); document.addEventListener('keydown', (event) => { if (event.key === 'Escape') { if (!$('#loan-modal').hidden) closeModal(); if (!$('#manager-modal').hidden) closeManagerModal(); if (!$('#manage-modal').hidden) closeManageModal(); } }); route();

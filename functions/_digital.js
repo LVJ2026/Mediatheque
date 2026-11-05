@@ -17,7 +17,7 @@ function digitalEquipmentId(fields) {
 }
 
 function isActiveDigitalLoan(fields) {
-  return fields.Equipement != null
+  return Number(fields.Equipement) > 0
     && fields.Date_Emprunt != null
     && fields.Date_Emprunt !== ''
     && (fields.Retour == null || fields.Retour === '')

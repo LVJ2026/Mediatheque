@@ -23,7 +23,7 @@ export async function onRequestPost({ request, env }) {
     const ids = new Set(input.loan_ids.map(Number));
     const records = (payload.records || []).filter((record) => ids.has(Number(record.id)));
     if (records.length !== ids.size) return Response.json({ detail: 'Une pré-réservation est introuvable.' }, { status: 404 });
-    if (records.some((record) => record.fields?.Validee === true || record.fields?.Retour || record.fields?.Date_Annulation)) {
+    if (records.some((record) => record.fields?.Validee === true || record.fields?.Validee === 1 || record.fields?.Retour || record.fields?.Date_Annulation)) {
       return Response.json({ detail: 'Cette pré-réservation a déjà été validée ou clôturée.' }, { status: 409 });
     }
 

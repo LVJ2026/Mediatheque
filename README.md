@@ -28,6 +28,8 @@ GRIST_BASE_URL=https://grist.numerique.gouv.fr
 GRIST_INVENTORY_TABLE=Inventaire_des_jeux
 GRIST_BOOKS_INVENTORY_TABLE=Inventaire livres albums
 GRIST_BOOKS_LOANS_TABLE=Emprunts livres albums
+GRIST_DIGITAL_INVENTORY_TABLE=Inventaire Numerique
+GRIST_DIGITAL_LOANS_TABLE=Emprunt Numerique
 GRIST_LOANS_TABLE=Table1
 GRIST_SCHOOLS_TABLE=Ecoles
 GRIST_ENABLED=true
@@ -81,6 +83,12 @@ Emprunts livres/albums (`Emprunts livres albums`) : ajouter les colonnes emprunt
 
 Inventaire livres/albums (`Inventaire livres albums`) : `Titre`, `Auteur`, `Lieu`, `Quantite`, `Qte_empruntee` (affiché « Qté empruntée ») et `Reste`. `Quantite` est le stock total. `Qte_empruntee` contient le nombre total d’exemplaires actuellement empruntés et est recalculé depuis les emprunts actifs après réservation, retour ou annulation. `Reste` est la disponibilité affichée dans l’application, généralement calculée par Grist comme `Quantite - Qte_empruntee`. Une réservation de plusieurs séries crée une ligne par série, avec le même emprunteur et la même période. Les marqueurs `Rappel_Envoye` et `Confirmation_Envoyee` évitent les courriels en double; ajoutez-les comme colonnes Date dans la table des emprunts livres/albums.
 
-Les rappels de retour des jeux lisent `Table1`; la confirmation des livres/albums part dès la création de la réservation, et le rappel à trois jours est envoyé par le Worker depuis `Emprunts livres albums`.
+Les rappels de retour des jeux lisent `Table1`; la confirmation des livres/albums part dès la création de la réservation, et les courriels des livres/albums sont envoyés par le Worker depuis `Emprunts livres albums`.
+
+Matériel numérique : une réservation crée une ligne par équipement dans `Emprunt Numerique`; les lignes partagent les mêmes coordonnées et dates, ce qui constitue une fiche unique. Une nouvelle demande est une pré-réservation (`Validee = FALSE`) et réserve le stock pour éviter les doubles réservations. Depuis le calendrier numérique en mode gestionnaire, le bouton **Valider la pré-réservation** passe toutes les lignes de la fiche à `Validee = TRUE` et envoie le courriel de confirmation. Le Worker envoie ensuite un courriel le jour du début et un rappel trois jours avant le retour, uniquement pour les emprunts validés.
+
+Inventaire numérique (`Inventaire Numerique`) : `Equipement`, `Marque`, `Type`, `Quantite` (ou `Quantité`), `Qte_empruntee` et `Reste`. `Quantite` est le stock total. L’application recalcule `Qte_empruntee` depuis les pré-réservations et emprunts actifs; `Reste` doit être une colonne calculée par Grist (par exemple `Quantite - Qte_empruntee`).
+
+Emprunts numériques (`Emprunt Numerique`) : `Nom`, `Prenom`, `Mail_professionnel`, `Ecole`, `Date_Emprunt`, `Date_Fin`, `Equipement` (référence vers l’inventaire), `Quantite`, `Validee` (case à cocher), `Retour`, `Date_Annulation`, `Confirmation_Envoyee` et `Rappel_Envoye`. Ajouter les colonnes de suivi des courriels comme colonnes Date. Une fiche avec plusieurs équipements est enregistrée sur plusieurs lignes, une par équipement.
 
 Une reservation groupant plusieurs jeux cree une ligne Grist par jeu, pour la meme periode.
