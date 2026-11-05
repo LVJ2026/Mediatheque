@@ -323,7 +323,7 @@ function renderDigitalCalendar() {
     const unavailable = availability.some((item) => item.available < 1);
     const approved = availability.some((item) => item.approved);
     const pending = availability.some((item) => item.pending);
-    const classes = ['day', approved ? 'occupied' : pending ? 'pending' : '', unavailable ? 'unavailable' : '', date < today ? 'past' : '', date === today ? 'today' : ''].filter(Boolean).join(' ');
+    const classes = ['day', approved ? 'approved' : pending ? 'pending' : '', unavailable ? 'unavailable' : '', date < today ? 'past' : '', date === today ? 'today' : ''].filter(Boolean).join(' ');
     const disabled = date < today || (unavailable && !state.manager);
     html += `<button class="${classes}" data-date="${date}" ${disabled ? 'disabled' : ''}>${day}</button>`;
   }
@@ -553,7 +553,7 @@ async function submitLoan(event) {
 function syncManagerButtons() { $('#manager-button').hidden = state.manager; $('#logout-manager').hidden = !state.manager; }
 window.addEventListener('hashchange', syncManagerButtons);
 syncManagerButtons();
-async function loginManager(event) { event.preventDefault(); const form = event.currentTarget; const response = await fetch('/api/manager/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: form.password.value }) }); const result = await response.json(); if (!response.ok) { $('#manager-error').textContent = result.detail || 'Connexion impossible.'; return; } state.manager = true; syncManagerButtons(); form.reset(); $('#manager-modal').hidden = true; if (state.selectedGames.length) renderCalendar(); if (state.selectedBooks.length) renderSeriesCalendar(); showToast('Mode gestionnaire activé.'); }
+async function loginManager(event) { event.preventDefault(); const form = event.currentTarget; const response = await fetch('/api/manager/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: form.password.value }) }); const result = await response.json(); if (!response.ok) { $('#manager-error').textContent = result.detail || 'Connexion impossible.'; return; } state.manager = true; syncManagerButtons(); form.reset(); $('#manager-modal').hidden = true; if (state.selectedGames.length) renderCalendar(); if (state.selectedBooks.length) renderSeriesCalendar(); if (state.selectedEquipment.length) renderDigitalCalendar(); showToast('Mode gestionnaire activé.'); }
 function openManagerModal() { $('#manager-error').textContent = ''; $('#manager-modal').hidden = false; $('#manager-password').focus(); }
 function closeManagerModal() { $('#manager-modal').hidden = true; }
 async function logoutManager() {
@@ -566,6 +566,7 @@ async function logoutManager() {
   if (location.hash !== '#home') location.hash = '#home';
   try { clearGameSelection(); } catch (error) { console.error('Nettoyage de la sélection des jeux impossible :', error); }
   try { clearBookSelection(); } catch (error) { console.error('Nettoyage de la sélection des séries impossible :', error); }
+  try { clearEquipmentSelection(); } catch (error) { console.error('Nettoyage de la sélection numérique impossible :', error); }
   closeManageModal();
   closeManagerModal();
   try {
@@ -579,8 +580,58 @@ async function logoutManager() {
   }
 }
 $('#logout-manager').addEventListener('click', logoutManager);
-function openManageModal(date) { const bookings = loansForDate(date); if (!bookings.length) return; $('#manage-modal').dataset.date = date; $('#manage-date').textContent = formatDate(date); $('#manage-list').innerHTML = bookings.map((booking) => { const resources = booking.entries.map((loan) => booking.collection === 'books' ? `${state.books.find((item) => item.id === loan.book_id)?.Titre || 'Série'} × ${loan.quantity}` : state.games.find((item) => item.id === loan.game_id)?.Jeu || 'Jeu'); return `<article class="manage-item"><div><strong>${escapeHtml(resources.join(' + '))}</strong><span>${escapeHtml(booking.name)} ${escapeHtml(booking.first_name)} · du ${formatDate(booking.loan_date)} au ${formatDate(booking.return_date)}</span></div><div class="manage-actions"><button class="secondary-button" data-print-id="${booking.id}" type="button">Fiche</button><button class="secondary-button" data-return-id="${booking.id}" data-return-date="${date}" type="button">Annuler à partir de cette date</button><button class="danger-button" data-delete-id="${booking.id}" data-return-date="${date}" type="button">Supprimer toute la réservation</button></div></article>`; }).join(''); $('#manage-modal').hidden = false; document.querySelectorAll('[data-print-id]').forEach((button) => button.addEventListener('click', () => printLoan(Number(button.dataset.printId)))); document.querySelectorAll('[data-return-id]').forEach((button) => button.addEventListener('click', () => returnLoan(Number(button.dataset.returnId), button.dataset.returnDate))); document.querySelectorAll('[data-delete-id]').forEach((button) => button.addEventListener('click', () => deleteBooking(Number(button.dataset.deleteId), button.dataset.returnDate))); }
+function bookingResources(booking) {
+  return booking.entries.map((loan) => booking.collection === 'books'
+    ? `${state.books.find((item) => item.id === loan.book_id)?.Titre || 'Série'} × ${loan.quantity}`
+    : booking.collection === 'digital'
+      ? `${state.equipment.find((item) => item.id === loan.equipment_id)?.Equipement || loan.equipment_name || 'Équipement'} × ${loan.quantity}`
+      : state.games.find((item) => item.id === loan.game_id)?.Jeu || 'Jeu');
+}
+function openManageModal(date) {
+  const bookings = loansForDate(date);
+  if (!bookings.length) return;
+  $('#manage-modal').dataset.date = date;
+  $('#manage-date').textContent = formatDate(date);
+  $('#manage-list').innerHTML = bookings.map((booking) => {
+    const resources = bookingResources(booking);
+    const status = booking.collection === 'digital' ? booking.is_approved ? ' · Validée' : ' · En attente de validation' : '';
+    const approveButton = state.manager && booking.collection === 'digital' && !booking.is_approved
+      ? `<button class="primary-button manage-approve" data-approve-id="${booking.id}" type="button">Valider la pré-réservation</button>`
+      : '';
+    const managerActions = state.manager
+      ? `<button class="secondary-button" data-return-id="${booking.id}" data-return-date="${date}" type="button">Enregistrer le retour à cette date</button><button class="danger-button" data-delete-id="${booking.id}" data-return-date="${date}" type="button">Annuler toute la réservation</button>`
+      : '';
+    return `<article class="manage-item"><div><strong>${escapeHtml(resources.join(' + '))}</strong><span>${escapeHtml(booking.name)} ${escapeHtml(booking.first_name)} · du ${formatDate(booking.loan_date)} au ${formatDate(booking.return_date)}${status}</span></div><div class="manage-actions"><button class="secondary-button" data-print-id="${booking.id}" type="button">Fiche</button>${approveButton}${managerActions}</div></article>`;
+  }).join('');
+  $('#manage-modal').hidden = false;
+  document.querySelectorAll('[data-print-id]').forEach((button) => button.addEventListener('click', () => printLoan(Number(button.dataset.printId))));
+  document.querySelectorAll('[data-approve-id]').forEach((button) => button.addEventListener('click', () => approveDigitalBooking(Number(button.dataset.approveId))));
+  document.querySelectorAll('[data-return-id]').forEach((button) => button.addEventListener('click', () => returnLoan(Number(button.dataset.returnId), button.dataset.returnDate)));
+  document.querySelectorAll('[data-delete-id]').forEach((button) => button.addEventListener('click', () => deleteBooking(Number(button.dataset.deleteId), button.dataset.returnDate)));
+}
 function closeManageModal() { $('#manage-modal').hidden = true; }
+async function approveDigitalBooking(id) {
+  const booking = allBookings().find((item) => item.id === id);
+  if (!booking || !confirm('Valider cette pré-réservation et envoyer un courriel de confirmation à l’emprunteur ?')) return;
+  try {
+    const response = await fetch('/api/digital-loans/approve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ loan_ids: booking.ids.map(Number) }),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.detail || 'La validation n’a pas pu être enregistrée dans Grist.');
+    const ids = new Set(booking.ids.map(String));
+    state.digitalLoans = state.digitalLoans.map((loan) => ids.has(String(loan.id)) ? { ...loan, is_approved: true } : loan);
+    closeManageModal();
+    if (state.selectedEquipment.length) renderDigitalCalendar();
+    showToast(result.email_status === 'sent'
+      ? 'Pré-réservation validée. Le courriel de confirmation a été envoyé.'
+      : `Pré-réservation validée, mais le courriel n’a pas pu être envoyé : ${result.email_error || 'aucun détail reçu'}`);
+  } catch (error) {
+    showToast(error.message || 'La validation a échoué.');
+  }
+}
 async function returnLoan(id, date) { const booking = allBookings().find((item) => item.id === id); if (!booking || !confirm(`Annuler uniquement cette réservation à partir du ${formatDate(date)} ? Les autres réservations, y compris futures, restent inchangées.`)) return; const printWindow = window.open('', '_blank'); try { const response = await fetch('/api/loans/return', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ loan_ids: booking.ids.map(Number), return_date: date, collection: booking.collection }) }); const result = await response.json(); if (!response.ok) throw new Error(result.detail || 'La date de retour n’a pas pu être enregistrée dans Grist.'); } catch (error) { printWindow?.close(); showToast(error.message || 'La date de retour n’a pas pu être enregistrée dans Grist.'); return; } const occupiedUntil = iso(new Date(new Date(`${date}T12:00:00`).getTime() - 86400000)); const ids = new Set(booking.ids.map(String)); const source = booking.collection === 'books' ? state.bookLoans : state.loans; const updated = source.map((loan) => ids.has(String(loan.id)) ? { ...loan, return_date: date, occupied_until: occupiedUntil } : loan); if (booking.collection === 'books') state.bookLoans = updated; else state.loans = updated; const resources = booking.entries.map((loan) => booking.collection === 'books' ? `${state.books.find((book) => book.id === loan.book_id)?.Titre || 'Série'} × ${loan.quantity}` : state.games.find((game) => game.id === loan.game_id)?.Jeu || 'Jeu'); closeManageModal(); if (booking.collection === 'books') renderSeriesCalendar(); else renderCalendar(); if (printWindow) printSheet('Fiche de retour', booking, resources, booking.loan_date, date, printWindow); showToast(`Retour enregistré dans Grist.${printWindow ? ' Fiche prête à imprimer en PDF.' : ''}`); }
 async function deleteBooking(id, returnDate) { const booking = allBookings().find((item) => item.id === id); if (!booking || !confirm('Annuler toute cette réservation ? Les autres réservations, y compris futures, restent inchangées.')) return; const printWindow = window.open('', '_blank'); try { const response = await fetch('/api/loans/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ loan_ids: booking.ids.map(Number), cancelled_date: returnDate, collection: booking.collection }) }); const result = await response.json(); if (!response.ok) throw new Error(result.detail || 'L’annulation n’a pas pu être enregistrée dans Grist.'); } catch (error) { printWindow?.close(); showToast(error.message || 'L’annulation n’a pas pu être enregistrée dans Grist.'); return; } const removedIds = new Set(booking.ids.map(String)); if (booking.collection === 'books') state.bookLoans = state.bookLoans.filter((loan) => !removedIds.has(String(loan.id))); else state.loans = state.loans.filter((loan) => !removedIds.has(String(loan.id))); closeManageModal(); if (booking.collection === 'books') renderSeriesCalendar(); else renderCalendar(); const resources = booking.entries.map((loan) => booking.collection === 'books' ? `${state.books.find((book) => book.id === loan.book_id)?.Titre || 'Série'} × ${loan.quantity}` : state.games.find((game) => game.id === loan.game_id)?.Jeu || 'Jeu'); if (printWindow) printSheet('Fiche de retour', booking, resources, booking.loan_date, returnDate, printWindow); showToast('Annulation enregistrée dans Grist.'); }
 function printLoan(id) { const booking = allBookings().find((item) => item.id === id); if (!booking) return; const resources = booking.entries.map((loan) => booking.collection === 'books' ? `${state.books.find((book) => book.id === loan.book_id)?.Titre || 'Série'} × ${loan.quantity}` : state.games.find((game) => game.id === loan.game_id)?.Jeu || 'Jeu'); printSheet('Fiche d’emprunt', booking, resources, booking.loan_date, booking.return_date); }
