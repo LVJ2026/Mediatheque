@@ -61,7 +61,6 @@ async function sendReminders(env, now) {
   const groups = new Map();
   const bookStarts = new Map();
   const bookReturns = new Map();
-  const digitalStarts = new Map();
   const digitalReturns = new Map();
 
   for (const record of payload.records || []) {
@@ -114,17 +113,17 @@ async function sendReminders(env, now) {
     const fields = record.fields || {};
     if (!(fields.Validee === true || fields.Validee === 1) || hasDate(fields.Retour) || hasDate(fields.Date_Annulation)) continue;
     const loan = normalizeDigitalLoan(record, digitalInventory.records || []);
+    if (loan.return_date !== reminderDate) continue;
     const key = reminderKey(loan);
-    const addToGroup = (groupsByNotice, notice) => {
-      if (!groupsByNotice.has(key)) groupsByNotice.set(key, { borrower: loan, records: [], quantities: new Map(), notice });
-      const group = groupsByNotice.get(key);
-      group.records.push(record);
-      group.quantities.set(loan.equipment_id, (group.quantities.get(loan.equipment_id) || 0) + loan.quantity);
-    };
-    if (loan.loan_date === today && !hasDate(fields.Confirmation_Envoyee)) addToGroup(digitalStarts, 'start');
-    if (loan.return_date === reminderDate && !hasDate(fields.Rappel_Envoye)) addToGroup(digitalReturns, 'return');
+    if (!digitalReturns.has(key)) {
+      digitalReturns.set(key, { borrower: loan, records: [], quantities: new Map(), alreadySent: false });
+    }
+    const group = digitalReturns.get(key);
+    group.records.push(record);
+    group.quantities.set(loan.equipment_id, (group.quantities.get(loan.equipment_id) || 0) + loan.quantity);
+    group.alreadySent ||= hasDate(fields.Rappel_Envoye);
   }
-  const dueDigitalGroups = [...digitalStarts.values()].concat([...digitalReturns.values()]);
+  const dueDigitalGroups = [...digitalReturns.values()].filter((group) => !group.alreadySent);
   if (!dueGroups.length && !dueBookGroups.length && !dueDigitalGroups.length) return;
 
   const gamesById = new Map();
@@ -202,23 +201,19 @@ async function sendReminders(env, now) {
       const equipmentList = [...group.quantities]
         .map(([id, quantity]) => `- ${equipmentById.get(id) || `Équipement ${id}`} × ${quantity}`)
         .join('\n');
-      const isStart = group.notice === 'start';
       try {
         await sendMail(env, {
           to: loan.professional_email,
-          subject: isStart
-            ? 'Votre emprunt de matériel numérique commence aujourd’hui'
-            : 'Rappel : retour de votre matériel numérique dans 3 jours',
-          text: isStart
-            ? `Bonjour ${loan.first_name} ${loan.name},\n\nVotre emprunt commence aujourd’hui pour :\n${equipmentList}\n\nLe retour est prévu le ${formatDate(loan.return_date)}.\n\nMédiathèque`
-            : `Bonjour ${loan.first_name} ${loan.name},\n\nNous vous rappelons que le retour prévu pour :\n${equipmentList}\nest le ${formatDate(loan.return_date)}.\n\nMédiathèque`,
+          subject: 'Rappel : retour de votre matériel numérique dans 3 jours',
+          text: `Bonjour ${loan.first_name} ${loan.name},\n\nNous vous rappelons que le retour prévu pour :\n${equipmentList}\nest le ${formatDate(loan.return_date)}.\n\nMédiathèque`,
         });
-        const marker = isStart ? { Confirmation_Envoyee: today } : { Rappel_Envoye: today };
         await gristRequest(env, digitalLoansTable(env), {
           method: 'PATCH',
-          body: JSON.stringify({ records: group.records.map((record) => ({ id: record.id, fields: marker })) }),
+          body: JSON.stringify({
+            records: group.records.map((record) => ({ id: record.id, fields: { Rappel_Envoye: today } })),
+          }),
         });
-        console.log(`${isStart ? 'Confirmation de début' : 'Rappel'} numérique envoyé pour ${loan.professional_email} (${loan.return_date}).`);
+        console.log(`Rappel numérique envoyé pour ${loan.professional_email} (${loan.return_date}).`);
       } catch (error) {
         console.error(`Échec du courriel numérique pour ${loan.professional_email} :`, error.message);
       }

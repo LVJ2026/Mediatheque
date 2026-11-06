@@ -290,12 +290,18 @@ function digitalAvailabilityForDate(equipment, date) {
   const bookings = state.digitalLoans.filter((loan) => loan.equipment_id === equipment.id
     && loan.loan_date <= date && date <= (loan.occupied_until || loan.return_date));
   const total = Math.max(0, Number(equipment.quantity) || 0);
-  const reserved = bookings.reduce((sum, loan) => sum + loan.quantity, 0);
+  const approvedQuantity = bookings
+    .filter((loan) => loan.is_approved)
+    .reduce((sum, loan) => sum + loan.quantity, 0);
+  const pendingQuantity = bookings
+    .filter((loan) => !loan.is_approved)
+    .reduce((sum, loan) => sum + loan.quantity, 0);
+  const reserved = approvedQuantity + pendingQuantity;
   return {
     total,
     available: Math.max(0, total - reserved),
-    approved: bookings.some((loan) => loan.is_approved),
-    pending: bookings.some((loan) => !loan.is_approved),
+    approvedQuantity,
+    pendingQuantity,
   };
 }
 function availableDigitalQuantityForPeriod(equipment, startDate, endDate) {
@@ -313,6 +319,8 @@ function renderDigitalCalendar() {
   const year = state.month.getFullYear();
   const month = state.month.getMonth();
   $('#digital-calendar-month').textContent = new Intl.DateTimeFormat('fr-FR', { month: 'long', year: 'numeric' }).format(state.month);
+  $('.digital-availability-key').innerHTML = '<span><i class="available-key"></i> disponible</span><span><i class="pending-key"></i> en attente</span><span><i class="partial-approved-key"></i> partiellement validé</span><span><i class="approved-key"></i> tout validé</span>';
+  $('#digital-calendar-content .calendar-help').textContent = 'Vert : disponible. Bleu : matériel en attente de validation. Orange : une partie de la quantité est validée. Rouge : toute la quantité est validée.';
   const firstDay = (new Date(year, month, 1).getDay() + 6) % 7;
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const today = iso(new Date());
@@ -321,10 +329,17 @@ function renderDigitalCalendar() {
   for (let day = 1; day <= daysInMonth; day += 1) {
     const date = iso(new Date(year, month, day));
     const availability = state.selectedEquipment.map((equipment) => digitalAvailabilityForDate(equipment, date));
-    const unavailable = availability.every((item) => item.available < 1);
-    const approved = availability.some((item) => item.approved);
-    const pending = availability.some((item) => item.pending);
-    const classes = ['day', pending ? 'pending' : approved ? 'approved' : '', unavailable ? 'unavailable' : '', date < today ? 'past' : '', date === today ? 'today' : ''].filter(Boolean).join(' ');
+    const total = availability.reduce((sum, item) => sum + item.total, 0);
+    const approvedQuantity = availability.reduce((sum, item) => sum + item.approvedQuantity, 0);
+    const pendingQuantity = availability.reduce((sum, item) => sum + item.pendingQuantity, 0);
+    const status = pendingQuantity > 0
+      ? 'pending'
+      : approvedQuantity > 0 && total > 0 && approvedQuantity >= total
+        ? 'approved'
+        : approvedQuantity > 0
+          ? 'partial-approved'
+          : 'available';
+    const classes = ['day', `digital-${status}`, date < today ? 'past' : '', date === today ? 'today' : ''].filter(Boolean).join(' ');
     const disabled = date < today;
     html += `<button class="${classes}" data-date="${date}" ${disabled ? 'disabled' : ''}>${day}</button>`;
   }
@@ -546,6 +561,7 @@ async function submitLoan(event) {
   }
   const emailStatus = response.headers.get('X-Email-Status');
   const emailError = response.headers.get('X-Email-Error');
+  const emailTrackingStatus = response.headers.get('X-Email-Tracking-Status');
   const stockStatus = response.headers.get('X-Stock-Status');
   const printStatus = printWindow ? 'La fiche est prête à imprimer en PDF.' : 'Autorisez les fenêtres surgissantes pour imprimer la fiche.';
   const emailMessage = emailStatus === 'sending'
@@ -556,7 +572,7 @@ async function submitLoan(event) {
       ? 'Le courriel de confirmation a été envoyé.'
       : `Échec du courriel : ${emailError ? decodeURIComponent(emailError) : 'aucun détail reçu'}.`;
   showToast(isDigital
-    ? `Pré-réservation enregistrée. Elle sera visible en orange jusqu’à validation par le gestionnaire. ${stockStatus === 'failed' ? 'Attention : la mise à jour du stock Grist a échoué.' : ''} ${printStatus}`
+    ? `Pré-réservation enregistrée. ${emailStatus === 'sent' ? 'Le courriel de réception a été envoyé.' : `Échec du courriel : ${emailError ? decodeURIComponent(emailError) : 'aucun détail reçu'}.`} ${emailTrackingStatus === 'failed' ? 'Attention : le suivi du courriel n’a pas été enregistré dans Grist.' : ''} ${stockStatus === 'failed' ? 'Attention : la mise à jour du stock Grist a échoué.' : ''} ${printStatus}`
     : `Réservation enregistrée. ${printStatus} ${emailMessage}`);
 }
 function syncManagerButtons() { $('#manager-button').hidden = state.manager; $('#logout-manager').hidden = !state.manager; }
