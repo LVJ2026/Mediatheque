@@ -580,8 +580,10 @@ async function submitLoan(event) {
       ? 'Le courriel de réception a été envoyé au demandeur.'
       : `Échec du courriel au demandeur : ${emailError ? decodeURIComponent(emailError) : 'aucun détail reçu'}.`);
     messages.push(managerEmailStatus === 'sent'
-      ? 'Le gestionnaire a été informé.'
-      : `Échec du courriel au gestionnaire : ${managerEmailError ? decodeURIComponent(managerEmailError) : 'aucun détail reçu'}.`);
+      ? 'Les gestionnaires ont été informés.'
+      : managerEmailStatus === 'partial'
+        ? `Seul un des gestionnaires a été informé : ${managerEmailError ? decodeURIComponent(managerEmailError) : 'un envoi a échoué'}.`
+        : `Échec du courriel aux gestionnaires : ${managerEmailError ? decodeURIComponent(managerEmailError) : 'aucun détail reçu'}.`);
     if (emailTrackingStatus === 'failed') {
       messages.push(`Le suivi du courriel au demandeur n’a pas été enregistré dans Grist${emailTrackingError ? ` : ${decodeURIComponent(emailTrackingError)}` : '.'}`);
     }

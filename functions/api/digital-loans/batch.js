@@ -68,25 +68,41 @@ async function sendRequestEmail(env, input, selection, inventoryById, created) {
     }
   }
 
-  let managerStatus = 'failed';
-  let managerError = '';
-  if (!env.MANAGER_EMAIL) {
-    managerError = 'MANAGER_EMAIL n’est pas configurée dans Cloudflare.';
+  const managerEmails = [...new Set([env.MANAGER_EMAIL1, env.MANAGER_EMAIL2]
+    .map((email) => typeof email === 'string' ? email.trim() : '')
+    .filter(Boolean))];
+  const managerErrors = [];
+  let managerSent = 0;
+  if (!managerEmails.length) {
+    managerErrors.push('Aucune adresse MANAGER_EMAIL1 ou MANAGER_EMAIL2 n’est configurée dans Cloudflare.');
   } else {
-    try {
-      await sendMail(env, {
-        to: env.MANAGER_EMAIL,
-        subject: 'Nouvelle pré-réservation de matériel numérique à valider',
-        text: `Une nouvelle pré-réservation de matériel numérique attend votre validation.\n\nDemandeur : ${input.first_name} ${input.name}\nÉcole : ${input.school}\nCourriel : ${input.professional_email}\n${dateRange}\n\nMatériel demandé :\n${equipmentList}\n\nConnectez-vous à l’interface gestionnaire pour traiter cette demande.\n\nMédiathèque`,
-      });
-      managerStatus = 'sent';
-    } catch (error) {
-      managerError = String(error.message || 'Erreur SMTP inconnue').slice(0, 200);
-      console.error('Échec du courriel de notification au gestionnaire :', managerError);
+    for (const email of managerEmails) {
+      try {
+        await sendMail(env, {
+          to: email,
+          subject: 'Nouvelle pré-réservation de matériel numérique à valider',
+          text: `Une nouvelle pré-réservation de matériel numérique attend votre validation.\n\nDemandeur : ${input.first_name} ${input.name}\nÉcole : ${input.school}\nCourriel : ${input.professional_email}\n${dateRange}\n\nMatériel demandé :\n${equipmentList}\n\nConnectez-vous à l’interface gestionnaire pour traiter cette demande.\n\nMédiathèque`,
+        });
+        managerSent += 1;
+      } catch (error) {
+        const message = String(error.message || 'Erreur SMTP inconnue').slice(0, 200);
+        managerErrors.push(message);
+        console.error('Échec du courriel de notification à un gestionnaire :', message);
+      }
     }
   }
 
-  return { borrowerStatus, borrowerError, trackingStatus, trackingError, managerStatus, managerError };
+  const managerStatus = managerSent === managerEmails.length && managerSent > 0
+    ? 'sent'
+    : managerSent > 0 ? 'partial' : 'failed';
+  return {
+    borrowerStatus,
+    borrowerError,
+    trackingStatus,
+    trackingError,
+    managerStatus,
+    managerError: managerErrors.join(' '),
+  };
 }
 
 function isValidDate(value) {
