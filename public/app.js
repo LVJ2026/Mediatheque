@@ -29,6 +29,7 @@ async function loadDigital() {
   }
   state.equipment = await inventoryResponse.json();
   state.digitalLoans = await loansResponse.json();
+  updatePendingReservationsButton();
   loadSchools();
   $('#digital-count').textContent = `${state.equipment.length} équipement${state.equipment.length > 1 ? 's' : ''}`;
   $('#digital-body').innerHTML = state.equipment.map((item) => `<tr data-equipment-id="${item.id}"><td class="selection-cell"><input type="checkbox" aria-label="Sélectionner ${escapeHtml(item.Equipement)}"></td><td><strong>${escapeHtml(item.Equipement)}</strong></td><td>${escapeHtml(item.Marque) || '—'}</td><td>${escapeHtml(item.Type) || '—'}</td><td>${escapeHtml(item.quantity)}</td><td class="digital-remaining">${escapeHtml(item.available_quantity)}</td></tr>`).join('');
@@ -47,6 +48,7 @@ async function refreshDigitalData() {
   if (!inventoryResponse.ok || !loansResponse.ok) throw new Error('Impossible d’actualiser le stock numérique.');
   state.equipment = await inventoryResponse.json();
   state.digitalLoans = await loansResponse.json();
+  updatePendingReservationsButton();
   document.querySelectorAll('#digital-body tr').forEach((row) => {
     const item = state.equipment.find((equipment) => equipment.id === Number(row.dataset.equipmentId));
     if (item) row.querySelector('.digital-remaining').textContent = item.available_quantity;
@@ -594,10 +596,98 @@ async function submitLoan(event) {
     showToast(`Réservation enregistrée. ${printStatus} ${emailMessage}`);
   }
 }
-function syncManagerButtons() { $('#manager-button').hidden = state.manager; $('#logout-manager').hidden = !state.manager; }
+function pendingDigitalBookings() {
+  const grouped = new Map();
+  for (const loan of state.digitalLoans) {
+    if (loan.is_approved || !loan.is_active) continue;
+    const key = [loan.name, loan.first_name, loan.professional_email, loan.school, loan.loan_date, loan.return_date].join('\u001f');
+    if (!grouped.has(key)) grouped.set(key, { ...loan, ids: [], entries: [] });
+    const booking = grouped.get(key);
+    booking.ids.push(loan.id);
+    booking.entries.push(loan);
+  }
+  return [...grouped.values()].sort((first, second) => first.loan_date.localeCompare(second.loan_date));
+}
+function ensurePendingReservationsModal() {
+  let modal = $('#pending-reservations-modal');
+  if (modal) return modal;
+  modal = document.createElement('div');
+  modal.id = 'pending-reservations-modal';
+  modal.className = 'modal-backdrop';
+  modal.hidden = true;
+  modal.innerHTML = '<div class="modal manage-modal" role="dialog" aria-modal="true" aria-labelledby="pending-reservations-title"><button class="modal-close" id="close-pending-reservations" type="button" aria-label="Fermer">×</button><p class="eyebrow">Espace gestionnaire</p><h2 id="pending-reservations-title">Réservations numériques en attente</h2><p class="modal-note">Matériel demandé et période de réservation.</p><div id="pending-reservations-list"></div></div>';
+  document.body.append(modal);
+  modal.addEventListener('click', (event) => {
+    if (event.target === modal) modal.hidden = true;
+  });
+  modal.querySelector('#close-pending-reservations').addEventListener('click', () => { modal.hidden = true; });
+  return modal;
+}
+function updatePendingReservationsButton() {
+  const button = $('#pending-reservations-button');
+  if (!button) return;
+  const count = pendingDigitalBookings().length;
+  button.textContent = `À valider (${count})`;
+  button.setAttribute('aria-label', `${count} réservation${count === 1 ? '' : 's'} numérique${count === 1 ? '' : 's'} en attente de validation`);
+  if (!count && !$('#pending-reservations-modal')?.hidden) $('#pending-reservations-modal').hidden = true;
+}
+function openPendingDigitalBooking(booking) {
+  $('#pending-reservations-modal').hidden = true;
+  state.collection = 'digital';
+  state.selectedEquipment = [...new Map(booking.entries.map((loan) => {
+    const equipment = state.equipment.find((item) => item.id === loan.equipment_id);
+    return equipment ? [equipment.id, { ...equipment, requested_quantity: 1 }] : null;
+  }).filter(Boolean)).values()];
+  state.month = new Date(`${booking.loan_date}T12:00:00`);
+  if (location.hash !== '#numerique') location.hash = '#numerique';
+  route();
+  document.querySelectorAll('#digital-body tr').forEach((row) => {
+    const selected = state.selectedEquipment.some((item) => item.id === Number(row.dataset.equipmentId));
+    row.classList.toggle('selected', selected);
+    row.querySelector('input[type="checkbox"]').checked = selected;
+  });
+  $('#digital-empty-calendar').hidden = state.selectedEquipment.length > 0;
+  $('#digital-calendar-content').hidden = state.selectedEquipment.length === 0;
+  $('#digital-selected').textContent = state.selectedEquipment.map((item) => item.Equipement).join(' + ');
+  renderDigitalCalendar();
+  openManageModal(booking.loan_date);
+}
+function showPendingReservations() {
+  const modal = ensurePendingReservationsModal();
+  const bookings = pendingDigitalBookings();
+  const list = modal.querySelector('#pending-reservations-list');
+  if (!bookings.length) {
+    list.innerHTML = '<p class="modal-note">Aucune réservation numérique en attente de validation.</p>';
+  } else {
+    list.innerHTML = bookings.map((booking, index) => {
+      const equipment = booking.entries.map((loan) => `${escapeHtml(loan.equipment_name)} × ${escapeHtml(loan.quantity)}`).join(', ');
+      return `<article class="manage-item pending-reservation"><div><strong>${equipment}</strong><span>${escapeHtml(booking.first_name)} ${escapeHtml(booking.name)} · ${formatDate(booking.loan_date)} au ${formatDate(booking.return_date)}</span></div><div class="manage-actions"><button class="secondary-button" data-pending-booking="${index}" type="button">Ouvrir</button></div></article>`;
+    }).join('');
+    list.querySelectorAll('[data-pending-booking]').forEach((button) => button.addEventListener('click', () => {
+      const booking = bookings[Number(button.dataset.pendingBooking)];
+      if (booking) openPendingDigitalBooking(booking);
+    }));
+  }
+  modal.hidden = false;
+}
+function syncManagerButtons() {
+  $('#manager-button').hidden = state.manager;
+  $('#logout-manager').hidden = !state.manager;
+  let pendingButton = $('#pending-reservations-button');
+  if (!pendingButton) {
+    pendingButton = document.createElement('button');
+    pendingButton.id = 'pending-reservations-button';
+    pendingButton.className = 'manager-button pending-reservations-button';
+    pendingButton.type = 'button';
+    pendingButton.addEventListener('click', showPendingReservations);
+    document.querySelector('.header-tools').insertBefore(pendingButton, $('#logout-manager'));
+  }
+  pendingButton.hidden = !state.manager;
+  updatePendingReservationsButton();
+}
 window.addEventListener('hashchange', syncManagerButtons);
 syncManagerButtons();
-async function loginManager(event) { event.preventDefault(); const form = event.currentTarget; const response = await fetch('/api/manager/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: form.password.value }) }); const result = await response.json(); if (!response.ok) { $('#manager-error').textContent = result.detail || 'Connexion impossible.'; return; } state.manager = true; syncManagerButtons(); form.reset(); $('#manager-modal').hidden = true; if (state.selectedGames.length) renderCalendar(); if (state.selectedBooks.length) renderSeriesCalendar(); if (state.selectedEquipment.length) renderDigitalCalendar(); showToast('Mode gestionnaire activé.'); }
+async function loginManager(event) { event.preventDefault(); const form = event.currentTarget; const response = await fetch('/api/manager/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: form.password.value }) }); const result = await response.json(); if (!response.ok) { $('#manager-error').textContent = result.detail || 'Connexion impossible.'; return; } state.manager = true; syncManagerButtons(); form.reset(); $('#manager-modal').hidden = true; if (state.selectedGames.length) renderCalendar(); if (state.selectedBooks.length) renderSeriesCalendar(); if (state.selectedEquipment.length) renderDigitalCalendar(); try { await loadDigital(); const pending = pendingDigitalBookings(); if (pending.length) showPendingReservations(); else showToast('Mode gestionnaire activé. Aucune réservation numérique en attente.'); } catch (error) { showToast(`Mode gestionnaire activé, mais les réservations numériques n’ont pas pu être vérifiées : ${error.message}`); } }
 function openManagerModal() { $('#manager-error').textContent = ''; $('#manager-modal').hidden = false; $('#manager-password').focus(); }
 function closeManagerModal() { $('#manager-modal').hidden = true; }
 async function logoutManager() {
@@ -614,6 +704,8 @@ async function logoutManager() {
   try { clearEquipmentSelection(); } catch (error) { console.error('Nettoyage de la sélection numérique impossible :', error); }
   closeManageModal();
   closeManagerModal();
+  const pendingModal = $('#pending-reservations-modal');
+  if (pendingModal) pendingModal.hidden = true;
   try {
     const response = await fetch('/api/manager/logout', { method: 'POST', cache: 'no-store', credentials: 'same-origin' });
     const result = await response.json().catch(() => ({}));
@@ -672,6 +764,7 @@ async function approveDigitalBooking(id, control) {
     state.digitalLoans = state.digitalLoans.map((loan) => ids.has(String(loan.id))
       ? { ...loan, is_approved: true }
       : loan);
+    updatePendingReservationsButton();
     if (state.selectedEquipment.length) renderDigitalCalendar();
     openManageModal($('#manage-modal').dataset.date);
     showToast('Réservation validée. Cliquez sur « Envoyer la confirmation » pour envoyer le courriel.');
@@ -768,6 +861,7 @@ async function deleteBooking(id, returnDate) {
   if (booking.collection === 'books') state.bookLoans = state.bookLoans.filter((loan) => !removedIds.has(String(loan.id)));
   else if (booking.collection === 'digital') state.digitalLoans = state.digitalLoans.filter((loan) => !removedIds.has(String(loan.id)));
   else state.loans = state.loans.filter((loan) => !removedIds.has(String(loan.id)));
+  if (booking.collection === 'digital') updatePendingReservationsButton();
   closeManageModal();
   if (booking.collection === 'books') renderSeriesCalendar();
   else if (booking.collection === 'digital') renderDigitalCalendar();
@@ -809,4 +903,4 @@ function route() {
     if (state.selectedEquipment.length) renderDigitalCalendar();
   }).catch((error) => console.error('Actualisation du matériel numérique impossible :', error));
 }
-window.addEventListener('hashchange', route); window.addEventListener('focus', refreshLoansWhenVisible); document.addEventListener('visibilitychange', refreshLoansWhenVisible); setInterval(refreshLoansWhenVisible, 15000); $('#previous-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() - 1); renderCalendar(); }); $('#next-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() + 1); renderCalendar(); }); $('#series-previous-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() - 1); renderSeriesCalendar(); }); $('#series-next-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() + 1); renderSeriesCalendar(); }); $('#digital-previous-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() - 1); renderDigitalCalendar(); }); $('#digital-next-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() + 1); renderDigitalCalendar(); }); $('#close-modal').addEventListener('click', closeModal); $('#loan-modal').addEventListener('click', (event) => { if (event.target.id === 'loan-modal') closeModal(); }); $('#loan-form').addEventListener('submit', submitLoan); $('#manager-button').addEventListener('click', openManagerModal); $('#manager-modal').addEventListener('click', (event) => { if (event.target.id === 'manager-modal') closeManagerModal(); }); $('#close-manager-modal').addEventListener('click', closeManagerModal); $('#manager-form').addEventListener('submit', loginManager); $('#manage-modal').addEventListener('click', (event) => { if (event.target.id === 'manage-modal') closeManageModal(); }); $('#close-manage-modal').addEventListener('click', closeManageModal); document.addEventListener('keydown', (event) => { if (event.key === 'Escape') { if (!$('#loan-modal').hidden) closeModal(); if (!$('#manager-modal').hidden) closeManagerModal(); if (!$('#manage-modal').hidden) closeManageModal(); } }); route();
+window.addEventListener('hashchange', route); window.addEventListener('focus', refreshLoansWhenVisible); document.addEventListener('visibilitychange', refreshLoansWhenVisible); setInterval(refreshLoansWhenVisible, 15000); $('#previous-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() - 1); renderCalendar(); }); $('#next-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() + 1); renderCalendar(); }); $('#series-previous-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() - 1); renderSeriesCalendar(); }); $('#series-next-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() + 1); renderSeriesCalendar(); }); $('#digital-previous-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() - 1); renderDigitalCalendar(); }); $('#digital-next-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() + 1); renderDigitalCalendar(); }); $('#close-modal').addEventListener('click', closeModal); $('#loan-modal').addEventListener('click', (event) => { if (event.target.id === 'loan-modal') closeModal(); }); $('#loan-form').addEventListener('submit', submitLoan); $('#manager-button').addEventListener('click', openManagerModal); $('#manager-modal').addEventListener('click', (event) => { if (event.target.id === 'manager-modal') closeManagerModal(); }); $('#close-manager-modal').addEventListener('click', closeManagerModal); $('#manager-form').addEventListener('submit', loginManager); $('#manage-modal').addEventListener('click', (event) => { if (event.target.id === 'manage-modal') closeManageModal(); }); $('#close-manage-modal').addEventListener('click', closeManageModal); document.addEventListener('keydown', (event) => { if (event.key === 'Escape') { if (!$('#loan-modal').hidden) closeModal(); if (!$('#manager-modal').hidden) closeManagerModal(); if (!$('#manage-modal').hidden) closeManageModal(); const pendingModal = $('#pending-reservations-modal'); if (pendingModal && !pendingModal.hidden) pendingModal.hidden = true; } }); route();
