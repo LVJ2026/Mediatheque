@@ -562,6 +562,9 @@ async function submitLoan(event) {
   const emailStatus = response.headers.get('X-Email-Status');
   const emailError = response.headers.get('X-Email-Error');
   const emailTrackingStatus = response.headers.get('X-Email-Tracking-Status');
+  const emailTrackingError = response.headers.get('X-Email-Tracking-Error');
+  const managerEmailStatus = response.headers.get('X-Manager-Email-Status');
+  const managerEmailError = response.headers.get('X-Manager-Email-Error');
   const stockStatus = response.headers.get('X-Stock-Status');
   const printStatus = printWindow ? 'La fiche est prête à imprimer en PDF.' : 'Autorisez les fenêtres surgissantes pour imprimer la fiche.';
   const emailMessage = emailStatus === 'sending'
@@ -571,9 +574,23 @@ async function submitLoan(event) {
     : emailStatus === 'sent'
       ? 'Le courriel de confirmation a été envoyé.'
       : `Échec du courriel : ${emailError ? decodeURIComponent(emailError) : 'aucun détail reçu'}.`;
-  showToast(isDigital
-    ? `Pré-réservation enregistrée. ${emailStatus === 'sent' ? 'Le courriel de réception a été envoyé.' : `Échec du courriel : ${emailError ? decodeURIComponent(emailError) : 'aucun détail reçu'}.`} ${emailTrackingStatus === 'failed' ? 'Attention : le suivi du courriel n’a pas été enregistré dans Grist.' : ''} ${stockStatus === 'failed' ? 'Attention : la mise à jour du stock Grist a échoué.' : ''} ${printStatus}`
-    : `Réservation enregistrée. ${printStatus} ${emailMessage}`);
+  if (isDigital) {
+    const messages = ['Pré-réservation enregistrée.'];
+    messages.push(emailStatus === 'sent'
+      ? 'Le courriel de réception a été envoyé au demandeur.'
+      : `Échec du courriel au demandeur : ${emailError ? decodeURIComponent(emailError) : 'aucun détail reçu'}.`);
+    messages.push(managerEmailStatus === 'sent'
+      ? 'Le gestionnaire a été informé.'
+      : `Échec du courriel au gestionnaire : ${managerEmailError ? decodeURIComponent(managerEmailError) : 'aucun détail reçu'}.`);
+    if (emailTrackingStatus === 'failed') {
+      messages.push(`Le suivi du courriel au demandeur n’a pas été enregistré dans Grist${emailTrackingError ? ` : ${decodeURIComponent(emailTrackingError)}` : '.'}`);
+    }
+    if (stockStatus === 'failed') messages.push('La mise à jour du stock Grist a échoué.');
+    messages.push(printStatus);
+    showToast(messages.join(' '));
+  } else {
+    showToast(`Réservation enregistrée. ${printStatus} ${emailMessage}`);
+  }
 }
 function syncManagerButtons() { $('#manager-button').hidden = state.manager; $('#logout-manager').hidden = !state.manager; }
 window.addEventListener('hashchange', syncManagerButtons);

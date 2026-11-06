@@ -28,37 +28,65 @@ async function sendRequestEmail(env, input, selection, inventoryById, created) {
     const equipment = inventoryById.get(Number(item.id));
     return `- ${equipment?.fields?.Equipement || `Équipement ${item.id}`} × ${item.quantity}`;
   }).join('\n');
+  const dateRange = `Du ${formatDate(input.loan_date)} au ${formatDate(input.end_date)}.`;
+  let borrowerStatus = 'sent';
+  let borrowerError = '';
   try {
     await sendMail(env, {
       to: input.professional_email,
       subject: 'Réception de votre demande de réservation de matériel numérique',
-      text: `Bonjour ${input.first_name} ${input.name},\n\nNous avons bien reçu votre demande de réservation pour :\n${equipmentList}\n\nDu ${formatDate(input.loan_date)} au ${formatDate(input.end_date)}.\nCette demande est en attente de validation par le gestionnaire. Vous recevrez un courriel lorsque la réservation sera validée.\n\nMédiathèque`,
+      text: `Bonjour ${input.first_name} ${input.name},\n\nNous avons bien reçu votre demande de réservation pour :\n${equipmentList}\n\n${dateRange}\nCette demande est en attente de validation par le gestionnaire. Vous recevrez un courriel lorsque la réservation sera validée.\n\nMédiathèque`,
     });
   } catch (error) {
-    const message = String(error.message || 'Erreur SMTP inconnue').slice(0, 200);
-    console.error('Échec du courriel de réception du matériel numérique :', message);
-    return { status: 'failed', tracking: 'not-saved', error: message };
+    borrowerStatus = 'failed';
+    borrowerError = String(error.message || 'Erreur SMTP inconnue').slice(0, 200);
+    console.error('Échec du courriel de réception du matériel numérique :', borrowerError);
   }
 
-  const ids = (created.records || []).map((record) => record.id).filter((id) => Number.isInteger(id));
-  if (!ids.length) {
-    const message = 'Les identifiants Grist des réservations sont indisponibles.';
-    console.error(`${message} Le courriel de demande a bien été envoyé, mais son suivi est impossible.`);
-    return { status: 'sent', tracking: 'failed', error: message };
+  let trackingStatus = 'not-saved';
+  let trackingError = '';
+  if (borrowerStatus === 'sent') {
+    const ids = (created.records || []).map((record) => record.id).filter((id) => Number.isInteger(id));
+    if (!ids.length) {
+      trackingStatus = 'failed';
+      trackingError = 'Les identifiants Grist des réservations sont indisponibles.';
+      console.error(`${trackingError} Le courriel de demande a bien été envoyé, mais son suivi est impossible.`);
+    } else {
+      try {
+        await gristRequest(env, digitalLoansTable(env), {
+          method: 'PATCH',
+          body: JSON.stringify({
+            records: ids.map((id) => ({ id, fields: { Demande_Envoyee: dateInParis(new Date()) } })),
+          }),
+        });
+        trackingStatus = 'saved';
+      } catch (error) {
+        trackingStatus = 'failed';
+        trackingError = String(error.message || 'Erreur de suivi inconnue').slice(0, 200);
+        console.error('Courriel numérique envoyé, mais le marqueur de demande n’a pas été enregistré :', trackingError);
+      }
+    }
   }
-  try {
-    await gristRequest(env, digitalLoansTable(env), {
-      method: 'PATCH',
-      body: JSON.stringify({
-        records: ids.map((id) => ({ id, fields: { Demande_Envoyee: dateInParis(new Date()) } })),
-      }),
-    });
-    return { status: 'sent', tracking: 'saved', error: '' };
-  } catch (error) {
-    const message = String(error.message || 'Erreur de suivi inconnue').slice(0, 200);
-    console.error('Courriel numérique envoyé, mais le marqueur de demande n’a pas été enregistré :', message);
-    return { status: 'sent', tracking: 'failed', error: message };
+
+  let managerStatus = 'failed';
+  let managerError = '';
+  if (!env.MANAGER_EMAIL) {
+    managerError = 'MANAGER_EMAIL n’est pas configurée dans Cloudflare.';
+  } else {
+    try {
+      await sendMail(env, {
+        to: env.MANAGER_EMAIL,
+        subject: 'Nouvelle pré-réservation de matériel numérique à valider',
+        text: `Une nouvelle pré-réservation de matériel numérique attend votre validation.\n\nDemandeur : ${input.first_name} ${input.name}\nÉcole : ${input.school}\nCourriel : ${input.professional_email}\n${dateRange}\n\nMatériel demandé :\n${equipmentList}\n\nConnectez-vous à l’interface gestionnaire pour traiter cette demande.\n\nMédiathèque`,
+      });
+      managerStatus = 'sent';
+    } catch (error) {
+      managerError = String(error.message || 'Erreur SMTP inconnue').slice(0, 200);
+      console.error('Échec du courriel de notification au gestionnaire :', managerError);
+    }
   }
+
+  return { borrowerStatus, borrowerError, trackingStatus, trackingError, managerStatus, managerError };
 }
 
 function isValidDate(value) {
@@ -123,10 +151,13 @@ export async function onRequestPost({ request, env }) {
     const email = await sendRequestEmail(env, input, selection, inventoryById, created);
     const headers = {
       'X-Stock-Status': stockStatus,
-      'X-Email-Status': email.status,
-      'X-Email-Tracking-Status': email.tracking,
+      'X-Email-Status': email.borrowerStatus,
+      'X-Email-Tracking-Status': email.trackingStatus,
+      'X-Manager-Email-Status': email.managerStatus,
     };
-    if (email.error) headers['X-Email-Error'] = encodeURIComponent(email.error);
+    if (email.borrowerError) headers['X-Email-Error'] = encodeURIComponent(email.borrowerError);
+    if (email.trackingError) headers['X-Email-Tracking-Error'] = encodeURIComponent(email.trackingError);
+    if (email.managerError) headers['X-Manager-Email-Error'] = encodeURIComponent(email.managerError);
     return Response.json(loans, {
       status: 201,
       headers,
