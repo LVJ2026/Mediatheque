@@ -632,7 +632,7 @@ function openManageModal(date) {
   $('#manage-modal').hidden = false;
   document.querySelectorAll('[data-print-id]').forEach((button) => button.addEventListener('click', () => printLoan(Number(button.dataset.printId))));
   document.querySelectorAll('[data-approve-id]').forEach((checkbox) => checkbox.addEventListener('change', () => approveDigitalBooking(Number(checkbox.dataset.approveId), checkbox)));
-  document.querySelectorAll('[data-resend-confirmation-id]').forEach((button) => button.addEventListener('click', () => approveDigitalBooking(Number(button.dataset.resendConfirmationId), button)));
+  document.querySelectorAll('[data-resend-confirmation-id]').forEach((button) => button.addEventListener('click', () => sendDigitalConfirmation(Number(button.dataset.resendConfirmationId), button)));
   document.querySelectorAll('[data-return-id]').forEach((button) => button.addEventListener('click', () => returnLoan(Number(button.dataset.returnId), button.dataset.returnDate)));
   document.querySelectorAll('[data-delete-id]').forEach((button) => button.addEventListener('click', () => deleteBooking(Number(button.dataset.deleteId), button.dataset.returnDate)));
 }
@@ -645,25 +645,52 @@ async function approveDigitalBooking(id, control) {
     const response = await fetch('/api/digital-loans/approve', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ loan_ids: booking.ids.map(Number) }),
+      body: JSON.stringify({ loan_ids: booking.ids.map(Number), action: 'approve' }),
     });
     const result = await response.json();
     if (!response.ok) throw new Error(result.detail || 'La validation n’a pas pu être enregistrée dans Grist.');
     const ids = new Set(booking.ids.map(String));
     state.digitalLoans = state.digitalLoans.map((loan) => ids.has(String(loan.id))
-      ? { ...loan, is_approved: true, confirmation_sent: result.email_status === 'sent' }
+      ? { ...loan, is_approved: true }
       : loan);
     if (state.selectedEquipment.length) renderDigitalCalendar();
     openManageModal($('#manage-modal').dataset.date);
-    showToast(result.email_status === 'sent'
-      ? result.tracking_status === 'failed'
-        ? 'Le courriel a été envoyé, mais son suivi n’a pas été enregistré dans Grist.'
-        : 'Pré-réservation validée. Le courriel de confirmation a été envoyé.'
-      : `Réservation validée, mais le courriel n’a pas pu être envoyé. Utilisez « Envoyer la confirmation » après correction : ${result.email_error || 'aucun détail reçu'}`);
+    showToast('Réservation validée. Cliquez sur « Envoyer la confirmation » pour envoyer le courriel.');
   } catch (error) {
     if (control instanceof HTMLInputElement) control.checked = false;
     control.disabled = false;
     showToast(error.message || 'La validation a échoué.');
+  }
+}
+async function sendDigitalConfirmation(id, control) {
+  const booking = allBookings().find((item) => item.id === id);
+  if (!booking) return;
+  control.disabled = true;
+  try {
+    const response = await fetch('/api/digital-loans/approve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ loan_ids: booking.ids.map(Number), action: 'send_confirmation' }),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.detail || 'Le courriel de confirmation n’a pas pu être envoyé.');
+    const ids = new Set(booking.ids.map(String));
+    const confirmationSent = result.email_status === 'sent' && result.tracking_status === 'saved';
+    state.digitalLoans = state.digitalLoans.map((loan) => ids.has(String(loan.id))
+      ? { ...loan, confirmation_sent: confirmationSent }
+      : loan);
+    if (state.selectedEquipment.length) renderDigitalCalendar();
+    openManageModal($('#manage-modal').dataset.date);
+    if (result.email_status === 'sent' && result.tracking_status === 'saved') {
+      showToast('Courriel de confirmation envoyé et suivi enregistré dans Grist.');
+    } else if (result.email_status === 'sent') {
+      showToast(`Le courriel a été envoyé, mais son suivi n’a pas été enregistré dans Grist. Vérifiez la colonne Confirmation_Envoyee avant de renvoyer le courriel. ${result.tracking_error || ''}`);
+    } else {
+      showToast(`La réservation est validée, mais le courriel n’a pas pu être envoyé : ${result.email_error || 'aucun détail reçu'}.`);
+    }
+  } catch (error) {
+    control.disabled = false;
+    showToast(error.message || 'L’envoi du courriel de confirmation a échoué.');
   }
 }
 async function returnLoan(id, date) {
