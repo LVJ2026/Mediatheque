@@ -321,7 +321,7 @@ function renderDigitalCalendar() {
   const year = state.month.getFullYear();
   const month = state.month.getMonth();
   $('#digital-calendar-month').textContent = new Intl.DateTimeFormat('fr-FR', { month: 'long', year: 'numeric' }).format(state.month);
-  $('.digital-availability-key').innerHTML = '<span><i class="available-key"></i> disponible</span><span><i class="pending-key"></i> en attente</span><span><i class="partial-approved-key"></i> matériel disponible</span><span><i class="approved-key"></i> tout le matériel est emprunté</span>';
+  $('.digital-availability-key').innerHTML = '<span><i class="available-key"></i> disponible</span><span><i class="pending-key"></i> en attente</span><span><i class="partial-approved-key"></i> il reste du matériel disponible</span><span><i class="approved-key"></i> tout le matériel est emprunté</span>';
   $('#digital-calendar-content .calendar-help').textContent = 'Vert : disponible. Bleu : en attente de validation. Orange : il reste du matériel disponible. Rouge : tout le matériel est emprunté.';
   const firstDay = (new Date(year, month, 1).getDay() + 6) % 7;
   const daysInMonth = new Date(year, month + 1, 0).getDate();
