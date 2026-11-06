@@ -629,7 +629,8 @@ function updatePendingReservationsButton() {
   const count = pendingDigitalBookings().length;
   button.textContent = `À valider (${count})`;
   button.setAttribute('aria-label', `${count} réservation${count === 1 ? '' : 's'} numérique${count === 1 ? '' : 's'} en attente de validation`);
-  if (!count && !$('#pending-reservations-modal')?.hidden) $('#pending-reservations-modal').hidden = true;
+  const modal = $('#pending-reservations-modal');
+  if (!count && modal && !modal.hidden) modal.hidden = true;
 }
 function openPendingDigitalBooking(booking) {
   $('#pending-reservations-modal').hidden = true;
