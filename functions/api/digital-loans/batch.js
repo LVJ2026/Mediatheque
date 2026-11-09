@@ -26,9 +26,10 @@ function formatDate(value) {
 async function sendRequestEmail(env, input, selection, inventoryById, created) {
   const equipmentList = selection.map((item) => {
     const equipment = inventoryById.get(Number(item.id));
-    return `- ${equipment?.fields?.Equipement || `Équipement ${item.id}`} × ${item.quantity}`;
+    return `- ${equipment?.fields?.Nom_Equipement || equipment?.fields?.Equipement || `Équipement ${item.id}`} × ${item.quantity}`;
   }).join('\n');
   const dateRange = `Du ${formatDate(input.loan_date)} au ${formatDate(input.end_date)}.`;
+  const interfaceUrl = new URL('/#numerique', input.interface_url).href;
   let borrowerStatus = 'sent';
   let borrowerError = '';
   try {
@@ -81,7 +82,7 @@ async function sendRequestEmail(env, input, selection, inventoryById, created) {
         await sendMail(env, {
           to: email,
           subject: 'Nouvelle pré-réservation de matériel numérique à valider',
-          text: `Une nouvelle pré-réservation de matériel numérique attend votre validation.\n\nDemandeur : ${input.first_name} ${input.name}\nÉcole : ${input.school}\nCourriel : ${input.professional_email}\n${dateRange}\n\nMatériel demandé :\n${equipmentList}\n\nConnectez-vous à l’interface gestionnaire pour traiter cette demande.\n\nMédiathèque`,
+          text: `Une nouvelle pré-réservation de matériel numérique attend votre validation.\n\nDemandeur : ${input.first_name} ${input.name}\nÉcole : ${input.school}\nCourriel : ${input.professional_email}\n${dateRange}\n\nMatériel demandé :\n${equipmentList}\n\nOuvrir l’interface gestionnaire : ${interfaceUrl}\n\nMédiathèque`,
         });
         managerSent += 1;
       } catch (error) {
@@ -118,11 +119,11 @@ export async function onRequestPost({ request, env }) {
     const selection = input.equipment;
     if (!input.name || !input.first_name || !input.professional_email || !input.school
       || !isValidDate(input.loan_date) || !isValidDate(input.end_date) || input.end_date < input.loan_date
-      || !Array.isArray(selection) || !selection.length
+      || !Array.isArray(selection) || selection.length !== 1
       || selection.some((item) => !Number.isInteger(Number(item.id)) || Number(item.id) < 1
         || !Number.isInteger(Number(item.quantity)) || Number(item.quantity) < 1)
       || new Set(selection.map((item) => Number(item.id))).size !== selection.length) {
-      return Response.json({ detail: 'Tous les champs sont obligatoires; vérifiez les quantités et la période.' }, { status: 422 });
+      return Response.json({ detail: 'Renseignez tous les champs, vérifiez la quantité et les dates, et sélectionnez un seul équipement.' }, { status: 422 });
     }
 
     const { inventory, activeLoans, totals } = await loadDigitalStock(env);
@@ -132,9 +133,13 @@ export async function onRequestPost({ request, env }) {
       const id = Number(item.id);
       const equipment = inventoryById.get(id);
       if (!equipment) return Response.json({ detail: 'Un équipement sélectionné est introuvable dans l’inventaire.' }, { status: 409 });
+      const remaining = equipment.fields?.Reste ?? equipment.fields?.['Reste'];
+      if (remaining != null && Number(remaining) <= 0) {
+        return Response.json({ detail: `${equipment.fields?.Nom_Equipement || equipment.fields?.Equipement || `L’équipement ${id}`} n’est plus disponible à l’emprunt.` }, { status: 409 });
+      }
       const total = totals.get(id) ?? 0;
       if (availableDigitalQuantity(id, input.loan_date, input.end_date, total, normalizedLoans) < Number(item.quantity)) {
-        return Response.json({ detail: `Stock insuffisant pour ${equipment.fields?.Equipement || `l’équipement ${id}`} sur cette période.` }, { status: 409 });
+        return Response.json({ detail: `Stock insuffisant pour ${equipment.fields?.Nom_Equipement || equipment.fields?.Equipement || `l’équipement ${id}`} sur cette période.` }, { status: 409 });
       }
     }
 
@@ -164,7 +169,7 @@ export async function onRequestPost({ request, env }) {
       stockStatus = 'failed';
       console.error('Mise à jour du stock numérique impossible après pré-réservation :', error.message);
     }
-    const email = await sendRequestEmail(env, input, selection, inventoryById, created);
+    const email = await sendRequestEmail(env, { ...input, interface_url: request.url }, selection, inventoryById, created);
     const headers = {
       'X-Stock-Status': stockStatus,
       'X-Email-Status': email.borrowerStatus,

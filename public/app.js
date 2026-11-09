@@ -32,12 +32,12 @@ async function loadDigital() {
   updatePendingReservationsButton();
   loadSchools();
   $('#digital-count').textContent = `${state.equipment.length} équipement${state.equipment.length > 1 ? 's' : ''}`;
-  $('#digital-body').innerHTML = state.equipment.map((item) => `<tr data-equipment-id="${item.id}"><td class="selection-cell"><input type="checkbox" aria-label="Sélectionner ${escapeHtml(item.Equipement)}"></td><td><strong>${escapeHtml(item.Equipement)}</strong></td><td>${escapeHtml(item.Marque) || '—'}</td><td>${escapeHtml(item.Type) || '—'}</td><td>${escapeHtml(item.quantity)}</td><td class="digital-remaining">${escapeHtml(item.available_quantity)}</td></tr>`).join('');
+  $('#digital-body').innerHTML = state.equipment.map((item) => `<tr data-equipment-id="${item.id}"><td class="selection-cell"><input type="radio" name="digital-equipment" aria-label="Sélectionner ${escapeHtml(item.Equipement)}" ${Number(item.available_quantity) > 0 || state.manager ? '' : 'disabled'}></td><td><strong>${escapeHtml(item.Equipement)}</strong></td><td>${escapeHtml(item.Marque) || '—'}</td><td>${escapeHtml(item.Type) || '—'}</td><td>${escapeHtml(item.quantity)}</td><td class="digital-remaining">${escapeHtml(item.available_quantity)}</td></tr>`).join('');
   document.querySelectorAll('#digital-body tr').forEach((row) => {
     row.addEventListener('click', (event) => { if (!event.target.closest('input')) toggleEquipment(Number(row.dataset.equipmentId)); });
-    const checkbox = row.querySelector('input[type="checkbox"]');
-    checkbox.addEventListener('click', (event) => event.stopPropagation());
-    checkbox.addEventListener('change', () => toggleEquipment(Number(row.dataset.equipmentId)));
+    const radio = row.querySelector('input[type="radio"]');
+    radio.addEventListener('click', (event) => event.stopPropagation());
+    radio.addEventListener('change', () => toggleEquipment(Number(row.dataset.equipmentId)));
   });
 }
 async function refreshDigitalData() {
@@ -51,7 +51,10 @@ async function refreshDigitalData() {
   updatePendingReservationsButton();
   document.querySelectorAll('#digital-body tr').forEach((row) => {
     const item = state.equipment.find((equipment) => equipment.id === Number(row.dataset.equipmentId));
-    if (item) row.querySelector('.digital-remaining').textContent = item.available_quantity;
+    if (item) {
+      row.querySelector('.digital-remaining').textContent = item.available_quantity;
+      row.querySelector('input[type="radio"]').disabled = Number(item.available_quantity) <= 0 && !state.manager;
+    }
   });
 }
 async function loadBooks() {
@@ -144,7 +147,9 @@ async function refreshLoans() {
     if (state.selectedBooks.length) renderSeriesCalendar();
     const manageModal = $('#manage-modal');
     if (!manageModal.hidden && manageModal.dataset.date) {
-      if (loansForDate(manageModal.dataset.date).length) openManageModal(manageModal.dataset.date);
+      if (manageModal.dataset.bookingId && allBookings().some((booking) => String(booking.id) === manageModal.dataset.bookingId)) {
+        openManageModal(manageModal.dataset.date, Number(manageModal.dataset.bookingId));
+      } else if (loansForDate(manageModal.dataset.date).length) openManageModal(manageModal.dataset.date);
       else closeManageModal();
     }
   } catch (error) {
@@ -210,27 +215,22 @@ function toggleBook(id) {
 }
 function toggleEquipment(id) {
   const equipment = state.equipment.find((item) => item.id === id);
-  if (!equipment) return;
-  const selected = state.selectedEquipment.some((item) => item.id === id);
-  const row = document.querySelector(`#digital-body tr[data-equipment-id="${id}"]`);
-  state.selectedEquipment = selected
-    ? state.selectedEquipment.filter((item) => item.id !== id)
-    : [...state.selectedEquipment, { ...equipment, requested_quantity: 1 }];
+  if (!equipment || (!state.manager && Number(equipment.available_quantity) <= 0)) return;
+  if (state.selectedEquipment.some((item) => item.id === id)) return;
+  state.selectedEquipment = [{ ...equipment, requested_quantity: 1 }];
   const today = iso(new Date());
-  if (!selected && state.selectedEquipment.length === 1) {
-    const nextReservation = state.digitalLoans
-      .filter((loan) => loan.is_active && loan.equipment_id === id && loan.return_date >= today)
-      .sort((first, second) => first.loan_date.localeCompare(second.loan_date))
-      .find((loan) => loan.loan_date <= today && today <= loan.occupied_until)
-      || state.digitalLoans.filter((loan) => loan.is_active && loan.equipment_id === id && loan.loan_date >= today)
-        .sort((first, second) => first.loan_date.localeCompare(second.loan_date))[0];
-    if (nextReservation) state.month = new Date(`${nextReservation.loan_date}T12:00:00`);
-    else state.month = new Date();
-  }
+  const nextReservation = state.digitalLoans
+    .filter((loan) => loan.is_active && loan.equipment_id === id && loan.return_date >= today)
+    .sort((first, second) => first.loan_date.localeCompare(second.loan_date))
+    .find((loan) => loan.loan_date <= today && today <= loan.occupied_until)
+    || state.digitalLoans.filter((loan) => loan.is_active && loan.equipment_id === id && loan.loan_date >= today)
+      .sort((first, second) => first.loan_date.localeCompare(second.loan_date))[0];
+  if (nextReservation) state.month = new Date(`${nextReservation.loan_date}T12:00:00`);
+  else state.month = new Date();
   document.querySelectorAll('#digital-body tr').forEach((itemRow) => {
     const isSelected = state.selectedEquipment.some((item) => item.id === Number(itemRow.dataset.equipmentId));
     itemRow.classList.toggle('selected', isSelected);
-    itemRow.querySelector('input[type="checkbox"]').checked = isSelected;
+    itemRow.querySelector('input[type="radio"]').checked = isSelected;
   });
   $('#digital-empty-calendar').hidden = state.selectedEquipment.length > 0;
   $('#digital-calendar-content').hidden = state.selectedEquipment.length === 0;
@@ -291,7 +291,9 @@ function bookAvailabilityForDate(book, date) {
 function digitalAvailabilityForDate(equipment, date) {
   const bookings = state.digitalLoans.filter((loan) => loan.equipment_id === equipment.id
     && loan.loan_date <= date && date <= (loan.occupied_until || loan.return_date));
-  const total = Math.max(0, Number(equipment.quantity) || 0);
+  const total = Number(equipment.available_quantity) <= 0
+    ? 0
+    : Math.max(0, Number(equipment.quantity) || 0);
   const approvedQuantity = bookings
     .filter((loan) => loan.is_approved)
     .reduce((sum, loan) => sum + loan.quantity, 0);
@@ -334,9 +336,10 @@ function renderDigitalCalendar() {
     const total = availability.reduce((sum, item) => sum + item.total, 0);
     const approvedQuantity = availability.reduce((sum, item) => sum + item.approvedQuantity, 0);
     const pendingQuantity = availability.reduce((sum, item) => sum + item.pendingQuantity, 0);
+    const remaining = availability.reduce((sum, item) => sum + item.available, 0);
     const status = pendingQuantity > 0
       ? 'pending'
-      : approvedQuantity > 0 && total > 0 && approvedQuantity >= total
+      : remaining === 0
         ? 'approved'
         : approvedQuantity > 0
           ? 'partial-approved'
@@ -608,6 +611,18 @@ function pendingDigitalBookings() {
   }
   return [...grouped.values()].sort((first, second) => first.loan_date.localeCompare(second.loan_date));
 }
+function activeDigitalBookings() {
+  const grouped = new Map();
+  for (const loan of state.digitalLoans) {
+    if (!loan.is_active) continue;
+    const key = [loan.name, loan.first_name, loan.professional_email, loan.school, loan.loan_date, loan.return_date].join('\u001f');
+    if (!grouped.has(key)) grouped.set(key, { ...loan, ids: [], entries: [] });
+    const booking = grouped.get(key);
+    booking.ids.push(loan.id);
+    booking.entries.push(loan);
+  }
+  return [...grouped.values()].sort((first, second) => first.return_date.localeCompare(second.return_date));
+}
 function ensurePendingReservationsModal() {
   let modal = $('#pending-reservations-modal');
   if (modal) return modal;
@@ -623,35 +638,75 @@ function ensurePendingReservationsModal() {
   modal.querySelector('#close-pending-reservations').addEventListener('click', () => { modal.hidden = true; });
   return modal;
 }
+function ensureDigitalLoansModal() {
+  let modal = $('#digital-loans-modal');
+  if (modal) return modal;
+  modal = document.createElement('div');
+  modal.id = 'digital-loans-modal';
+  modal.className = 'modal-backdrop';
+  modal.hidden = true;
+  modal.innerHTML = '<div class="modal manage-modal" role="dialog" aria-modal="true" aria-labelledby="digital-loans-title"><button class="modal-close" id="close-digital-loans" type="button" aria-label="Fermer">×</button><p class="eyebrow">Espace gestionnaire</p><h2 id="digital-loans-title">Emprunts numériques en cours</h2><p class="modal-note">Sélectionnez une réservation pour consulter son détail et ses actions.</p><div id="digital-loans-list"></div></div>';
+  document.body.append(modal);
+  modal.addEventListener('click', (event) => {
+    if (event.target === modal) modal.hidden = true;
+  });
+  modal.querySelector('#close-digital-loans').addEventListener('click', () => { modal.hidden = true; });
+  return modal;
+}
 function updatePendingReservationsButton() {
   const button = $('#pending-reservations-button');
   if (!button) return;
   const count = pendingDigitalBookings().length;
   button.textContent = `À valider (${count})`;
   button.setAttribute('aria-label', `${count} réservation${count === 1 ? '' : 's'} numérique${count === 1 ? '' : 's'} en attente de validation`);
+  button.classList.toggle('has-pending', count > 0);
   const modal = $('#pending-reservations-modal');
   if (!count && modal && !modal.hidden) modal.hidden = true;
 }
-function openPendingDigitalBooking(booking) {
-  $('#pending-reservations-modal').hidden = true;
+function openDigitalBooking(booking) {
+  const pendingModal = $('#pending-reservations-modal');
+  if (pendingModal) pendingModal.hidden = true;
+  const digitalLoansModal = $('#digital-loans-modal');
+  if (digitalLoansModal) digitalLoansModal.hidden = true;
   state.collection = 'digital';
   state.selectedEquipment = [...new Map(booking.entries.map((loan) => {
     const equipment = state.equipment.find((item) => item.id === loan.equipment_id);
     return equipment ? [equipment.id, { ...equipment, requested_quantity: 1 }] : null;
   }).filter(Boolean)).values()];
-  state.month = new Date(`${booking.loan_date}T12:00:00`);
+  const today = iso(new Date());
+  const manageDate = today < booking.loan_date ? booking.loan_date : today;
+  state.month = new Date(`${manageDate}T12:00:00`);
   if (location.hash !== '#numerique') location.hash = '#numerique';
   route();
   document.querySelectorAll('#digital-body tr').forEach((row) => {
     const selected = state.selectedEquipment.some((item) => item.id === Number(row.dataset.equipmentId));
     row.classList.toggle('selected', selected);
-    row.querySelector('input[type="checkbox"]').checked = selected;
+    row.querySelector('input[type="radio"]').checked = selected;
   });
   $('#digital-empty-calendar').hidden = state.selectedEquipment.length > 0;
   $('#digital-calendar-content').hidden = state.selectedEquipment.length === 0;
   $('#digital-selected').textContent = state.selectedEquipment.map((item) => item.Equipement).join(' + ');
   renderDigitalCalendar();
-  openManageModal(booking.loan_date);
+  openManageModal(manageDate, booking.id);
+}
+function showDigitalLoans() {
+  const modal = ensureDigitalLoansModal();
+  const bookings = activeDigitalBookings();
+  const list = modal.querySelector('#digital-loans-list');
+  if (!bookings.length) {
+    list.innerHTML = '<p class="modal-note">Aucun emprunt numérique en cours.</p>';
+  } else {
+    list.innerHTML = `<div class="table-wrap"><table class="digital-loans-table"><thead><tr><th>Nom de l’équipement</th><th>Emprunté par</th><th>Du… au…</th></tr></thead><tbody>${bookings.map((booking, index) => {
+      const equipment = booking.entries.map((loan) => `${escapeHtml(loan.equipment_name)} × ${escapeHtml(loan.quantity)}`).join(', ');
+      const borrower = `${escapeHtml(booking.first_name)} ${escapeHtml(booking.name)}`;
+      return `<tr><td><button class="digital-loan-open" data-active-booking="${index}" type="button">${equipment}</button></td><td>${borrower}</td><td>Du ${formatDate(booking.loan_date)} au ${formatDate(booking.return_date)}</td></tr>`;
+    }).join('')}</tbody></table></div>`;
+    list.querySelectorAll('[data-active-booking]').forEach((button) => button.addEventListener('click', () => {
+      const booking = bookings[Number(button.dataset.activeBooking)];
+      if (booking) openDigitalBooking(booking);
+    }));
+  }
+  modal.hidden = false;
 }
 function showPendingReservations() {
   const modal = ensurePendingReservationsModal();
@@ -666,7 +721,7 @@ function showPendingReservations() {
     }).join('');
     list.querySelectorAll('[data-pending-booking]').forEach((button) => button.addEventListener('click', () => {
       const booking = bookings[Number(button.dataset.pendingBooking)];
-      if (booking) openPendingDigitalBooking(booking);
+      if (booking) openDigitalBooking(booking);
     }));
   }
   modal.hidden = false;
@@ -684,6 +739,17 @@ function syncManagerButtons() {
     document.querySelector('.header-tools').insertBefore(pendingButton, $('#logout-manager'));
   }
   pendingButton.hidden = !state.manager;
+  let loansButton = $('#digital-loans-button');
+  if (!loansButton) {
+    loansButton = document.createElement('button');
+    loansButton.id = 'digital-loans-button';
+    loansButton.className = 'manager-button';
+    loansButton.type = 'button';
+    loansButton.textContent = 'Emprunts numériques';
+    loansButton.addEventListener('click', showDigitalLoans);
+    document.querySelector('.header-tools').insertBefore(loansButton, $('#logout-manager'));
+  }
+  loansButton.hidden = !state.manager;
   updatePendingReservationsButton();
 }
 window.addEventListener('hashchange', syncManagerButtons);
@@ -725,85 +791,94 @@ function bookingResources(booking) {
       ? `${state.equipment.find((item) => item.id === loan.equipment_id)?.Equipement || loan.equipment_name || 'Équipement'} × ${loan.quantity}`
       : state.games.find((item) => item.id === loan.game_id)?.Jeu || 'Jeu');
 }
-function openManageModal(date) {
-  const bookings = loansForDate(date);
+function openManageModal(date, bookingId) {
+  const bookings = bookingId
+    ? allBookings().filter((booking) => booking.id === bookingId)
+    : loansForDate(date);
   if (!bookings.length) return;
   $('#manage-modal').dataset.date = date;
+  if (bookingId) $('#manage-modal').dataset.bookingId = String(bookingId);
+  else delete $('#manage-modal').dataset.bookingId;
   $('#manage-date').textContent = formatDate(date);
   $('#manage-list').innerHTML = bookings.map((booking) => {
     const resources = bookingResources(booking);
     const status = booking.collection === 'digital' ? booking.is_approved ? ' · Validée' : ' · En attente de validation' : '';
     const approvalControl = state.manager && booking.collection === 'digital'
-      ? `<label class="manager-approval"><input type="checkbox" data-approve-id="${booking.id}" ${booking.is_approved ? 'checked disabled' : ''}> Validée</label>${booking.is_approved && !booking.confirmation_sent ? `<button class="secondary-button" data-resend-confirmation-id="${booking.id}" type="button">Envoyer la confirmation</button>` : ''}`
+      ? `<label class="manager-approval"><input type="checkbox" data-approve-id="${booking.id}" ${booking.is_approved ? 'checked' : ''} ${booking.is_approved && booking.confirmation_sent ? 'disabled' : ''} ${booking.is_approved && !booking.confirmation_sent ? 'title="Cliquer pour réessayer l’envoi du courriel"' : ''}> Validée</label>`
       : '';
+    const reminderAction = booking.collection === 'digital'
+      && booking.entries.every((loan) => loan.is_active)
+      && booking.return_date <= iso(new Date())
+      ? `<button class="secondary-button" data-reminder-id="${booking.id}" type="button">Envoyer un rappel</button>`
+      : '';
+    const returnAction = booking.collection === 'digital' && !booking.is_approved
+      ? ''
+      : `<button class="secondary-button" data-return-id="${booking.id}" data-return-date="${date}" type="button">Enregistrer le retour à cette date</button>`;
     const managerActions = state.manager
-      ? `<button class="secondary-button" data-return-id="${booking.id}" data-return-date="${date}" type="button">Enregistrer le retour à cette date</button><button class="danger-button" data-delete-id="${booking.id}" data-return-date="${date}" type="button">Annuler toute la réservation</button>`
+      ? `${reminderAction}${returnAction}<button class="danger-button" data-delete-id="${booking.id}" data-return-date="${date}" type="button">Annuler toute la réservation</button>`
       : '';
     return `<article class="manage-item"><div><strong>${escapeHtml(resources.join(' + '))}</strong><span>${escapeHtml(booking.name)} ${escapeHtml(booking.first_name)} · du ${formatDate(booking.loan_date)} au ${formatDate(booking.return_date)}${status}</span></div><div class="manage-actions">${approvalControl}<button class="secondary-button" data-print-id="${booking.id}" type="button">Fiche</button>${managerActions}</div></article>`;
   }).join('');
   $('#manage-modal').hidden = false;
   document.querySelectorAll('[data-print-id]').forEach((button) => button.addEventListener('click', () => printLoan(Number(button.dataset.printId))));
   document.querySelectorAll('[data-approve-id]').forEach((checkbox) => checkbox.addEventListener('change', () => approveDigitalBooking(Number(checkbox.dataset.approveId), checkbox)));
-  document.querySelectorAll('[data-resend-confirmation-id]').forEach((button) => button.addEventListener('click', () => sendDigitalConfirmation(Number(button.dataset.resendConfirmationId), button)));
+  document.querySelectorAll('[data-reminder-id]').forEach((button) => button.addEventListener('click', () => sendDigitalReminder(Number(button.dataset.reminderId), button)));
   document.querySelectorAll('[data-return-id]').forEach((button) => button.addEventListener('click', () => returnLoan(Number(button.dataset.returnId), button.dataset.returnDate)));
   document.querySelectorAll('[data-delete-id]').forEach((button) => button.addEventListener('click', () => deleteBooking(Number(button.dataset.deleteId), button.dataset.returnDate)));
 }
 function closeManageModal() { $('#manage-modal').hidden = true; }
 async function approveDigitalBooking(id, control) {
   const booking = allBookings().find((item) => item.id === id);
-  if (!booking || (control instanceof HTMLInputElement && !control.checked)) return;
+  if (!booking) return;
+  if (control instanceof HTMLInputElement && !control.checked) {
+    if (!booking.is_approved || booking.confirmation_sent) return;
+    control.checked = true;
+  }
   control.disabled = true;
   try {
     const response = await fetch('/api/digital-loans/approve', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ loan_ids: booking.ids.map(Number), action: 'approve' }),
+      body: JSON.stringify({ loan_ids: booking.ids.map(Number) }),
     });
     const result = await response.json();
     if (!response.ok) throw new Error(result.detail || 'La validation n’a pas pu être enregistrée dans Grist.');
     const ids = new Set(booking.ids.map(String));
     state.digitalLoans = state.digitalLoans.map((loan) => ids.has(String(loan.id))
-      ? { ...loan, is_approved: true }
+      ? { ...loan, is_approved: true, confirmation_sent: result.email_status === 'sent' }
       : loan);
     updatePendingReservationsButton();
     if (state.selectedEquipment.length) renderDigitalCalendar();
-    openManageModal($('#manage-modal').dataset.date);
-    showToast('Réservation validée. Cliquez sur « Envoyer la confirmation » pour envoyer le courriel.');
+    openManageModal($('#manage-modal').dataset.date, booking.id);
+    if (result.email_status === 'sent' && result.tracking_status === 'saved') {
+      showToast('Réservation validée et courriel de confirmation envoyé.');
+    } else if (result.email_status === 'sent') {
+      showToast(`Réservation validée et courriel envoyé, mais son suivi Grist a échoué : ${result.tracking_error || 'vérifiez Confirmation_Envoyee'}.`);
+    } else {
+      showToast(`Réservation validée, mais le courriel de confirmation a échoué : ${result.email_error || 'aucun détail reçu'}.`);
+    }
   } catch (error) {
     if (control instanceof HTMLInputElement) control.checked = false;
     control.disabled = false;
     showToast(error.message || 'La validation a échoué.');
   }
 }
-async function sendDigitalConfirmation(id, control) {
+async function sendDigitalReminder(id, control) {
   const booking = allBookings().find((item) => item.id === id);
   if (!booking) return;
   control.disabled = true;
   try {
-    const response = await fetch('/api/digital-loans/approve', {
+    const response = await fetch('/api/digital-loans/reminder', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ loan_ids: booking.ids.map(Number), action: 'send_confirmation' }),
+      body: JSON.stringify({ loan_ids: booking.ids.map(Number) }),
     });
     const result = await response.json();
-    if (!response.ok) throw new Error(result.detail || 'Le courriel de confirmation n’a pas pu être envoyé.');
-    const ids = new Set(booking.ids.map(String));
-    const confirmationSent = result.email_status === 'sent' && result.tracking_status === 'saved';
-    state.digitalLoans = state.digitalLoans.map((loan) => ids.has(String(loan.id))
-      ? { ...loan, confirmation_sent: confirmationSent }
-      : loan);
-    if (state.selectedEquipment.length) renderDigitalCalendar();
-    openManageModal($('#manage-modal').dataset.date);
-    if (result.email_status === 'sent' && result.tracking_status === 'saved') {
-      showToast('Courriel de confirmation envoyé et suivi enregistré dans Grist.');
-    } else if (result.email_status === 'sent') {
-      showToast(`Le courriel a été envoyé, mais son suivi n’a pas été enregistré dans Grist. Vérifiez la colonne Confirmation_Envoyee avant de renvoyer le courriel. ${result.tracking_error || ''}`);
-    } else {
-      showToast(`La réservation est validée, mais le courriel n’a pas pu être envoyé : ${result.email_error || 'aucun détail reçu'}.`);
-    }
+    if (!response.ok) throw new Error(result.detail || 'Le courriel de rappel n’a pas pu être envoyé.');
+    showToast('Courriel de rappel envoyé à l’emprunteur.');
   } catch (error) {
     control.disabled = false;
-    showToast(error.message || 'L’envoi du courriel de confirmation a échoué.');
+    showToast(error.message || 'L’envoi du courriel de rappel a échoué.');
   }
 }
 async function returnLoan(id, date) {
@@ -870,7 +945,8 @@ async function deleteBooking(id, returnDate) {
   const resources = bookingResources(booking);
   if (printWindow) printSheet('Fiche de retour', booking, resources, booking.loan_date, returnDate, printWindow);
   if (booking.collection === 'digital') refreshDigitalData().catch((error) => console.error('Actualisation du stock numérique après annulation impossible :', error));
-  showToast('Annulation enregistrée dans Grist.');
+  if (result.email_status === 'sent') showToast('Annulation enregistrée et courriel envoyé à l’emprunteur.');
+  else showToast(`Annulation enregistrée, mais le courriel à l’emprunteur a échoué : ${result.email_error || 'aucun détail reçu'}.`);
 }
 function printLoan(id) {
   const booking = allBookings().find((item) => item.id === id);
@@ -904,4 +980,4 @@ function route() {
     if (state.selectedEquipment.length) renderDigitalCalendar();
   }).catch((error) => console.error('Actualisation du matériel numérique impossible :', error));
 }
-window.addEventListener('hashchange', route); window.addEventListener('focus', refreshLoansWhenVisible); document.addEventListener('visibilitychange', refreshLoansWhenVisible); setInterval(refreshLoansWhenVisible, 15000); $('#previous-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() - 1); renderCalendar(); }); $('#next-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() + 1); renderCalendar(); }); $('#series-previous-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() - 1); renderSeriesCalendar(); }); $('#series-next-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() + 1); renderSeriesCalendar(); }); $('#digital-previous-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() - 1); renderDigitalCalendar(); }); $('#digital-next-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() + 1); renderDigitalCalendar(); }); $('#close-modal').addEventListener('click', closeModal); $('#loan-modal').addEventListener('click', (event) => { if (event.target.id === 'loan-modal') closeModal(); }); $('#loan-form').addEventListener('submit', submitLoan); $('#manager-button').addEventListener('click', openManagerModal); $('#manager-modal').addEventListener('click', (event) => { if (event.target.id === 'manager-modal') closeManagerModal(); }); $('#close-manager-modal').addEventListener('click', closeManagerModal); $('#manager-form').addEventListener('submit', loginManager); $('#manage-modal').addEventListener('click', (event) => { if (event.target.id === 'manage-modal') closeManageModal(); }); $('#close-manage-modal').addEventListener('click', closeManageModal); document.addEventListener('keydown', (event) => { if (event.key === 'Escape') { if (!$('#loan-modal').hidden) closeModal(); if (!$('#manager-modal').hidden) closeManagerModal(); if (!$('#manage-modal').hidden) closeManageModal(); const pendingModal = $('#pending-reservations-modal'); if (pendingModal && !pendingModal.hidden) pendingModal.hidden = true; } }); route();
+window.addEventListener('hashchange', route); window.addEventListener('focus', refreshLoansWhenVisible); document.addEventListener('visibilitychange', refreshLoansWhenVisible); setInterval(refreshLoansWhenVisible, 15000); $('#previous-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() - 1); renderCalendar(); }); $('#next-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() + 1); renderCalendar(); }); $('#series-previous-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() - 1); renderSeriesCalendar(); }); $('#series-next-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() + 1); renderSeriesCalendar(); }); $('#digital-previous-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() - 1); renderDigitalCalendar(); }); $('#digital-next-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() + 1); renderDigitalCalendar(); }); $('#close-modal').addEventListener('click', closeModal); $('#loan-modal').addEventListener('click', (event) => { if (event.target.id === 'loan-modal') closeModal(); }); $('#loan-form').addEventListener('submit', submitLoan); $('#manager-button').addEventListener('click', openManagerModal); $('#manager-modal').addEventListener('click', (event) => { if (event.target.id === 'manager-modal') closeManagerModal(); }); $('#close-manager-modal').addEventListener('click', closeManagerModal); $('#manager-form').addEventListener('submit', loginManager); $('#manage-modal').addEventListener('click', (event) => { if (event.target.id === 'manage-modal') closeManageModal(); }); $('#close-manage-modal').addEventListener('click', closeManageModal); document.addEventListener('keydown', (event) => { if (event.key === 'Escape') { if (!$('#loan-modal').hidden) closeModal(); if (!$('#manager-modal').hidden) closeManagerModal(); if (!$('#manage-modal').hidden) closeManageModal(); const pendingModal = $('#pending-reservations-modal'); if (pendingModal && !pendingModal.hidden) pendingModal.hidden = true; const digitalLoansModal = $('#digital-loans-modal'); if (digitalLoansModal && !digitalLoansModal.hidden) digitalLoansModal.hidden = true; } }); route();

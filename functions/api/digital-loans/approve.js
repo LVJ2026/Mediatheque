@@ -16,11 +16,6 @@ export async function onRequestPost({ request, env }) {
     const input = await request.json();
     if (!validIds(input.loan_ids)) return Response.json({ detail: 'Identifiants de réservation invalides.' }, { status: 422 });
 
-    const action = input.action || 'approve';
-    if (action !== 'approve' && action !== 'send_confirmation') {
-      return Response.json({ detail: 'Action de réservation invalide.' }, { status: 422 });
-    }
-
     const payload = await gristRequest(env, digitalLoansTable(env));
     const ids = new Set(input.loan_ids.map(Number));
     const records = (payload.records || []).filter((record) => ids.has(Number(record.id)));
@@ -33,22 +28,15 @@ export async function onRequestPost({ request, env }) {
     if (approved.length && approved.length !== records.length) {
       return Response.json({ detail: 'Les lignes de cette fiche ont des états de validation différents.' }, { status: 409 });
     }
-
-    if (action === 'approve') {
-      if (!approved.length) {
-        await gristRequest(env, digitalLoansTable(env), {
-          method: 'PATCH',
-          body: JSON.stringify({ records: records.map((record) => ({ id: record.id, fields: { Validee: true } })) }),
-        });
-      }
-      return Response.json({ approved: records.length, email_status: 'not_requested' });
+    if (approved.length === records.length && records.some((record) => record.fields?.Confirmation_Envoyee)) {
+      return Response.json({ detail: 'Le courriel de confirmation a déjà été envoyé.' }, { status: 409 });
     }
 
     if (!approved.length) {
-      return Response.json({ detail: 'Validez d’abord la réservation avant d’envoyer sa confirmation.' }, { status: 409 });
-    }
-    if (records.some((record) => record.fields?.Confirmation_Envoyee)) {
-      return Response.json({ detail: 'Le courriel de confirmation a déjà été envoyé.' }, { status: 409 });
+      await gristRequest(env, digitalLoansTable(env), {
+        method: 'PATCH',
+        body: JSON.stringify({ records: records.map((record) => ({ id: record.id, fields: { Validee: true } })) }),
+      });
     }
 
     const inventory = await gristRequest(env, digitalInventoryTable(env));
@@ -68,13 +56,11 @@ export async function onRequestPost({ request, env }) {
       dateStyle: 'long',
       timeZone: 'UTC',
     }).format(new Date(`${value}T12:00:00Z`));
-    let emailStatus = 'sent';
-    let emailError = '';
     try {
       await sendMail(env, {
         to: first.professional_email,
         subject: 'Confirmation de votre réservation de matériel numérique',
-        text: `Bonjour ${first.first_name} ${first.name},\n\nVotre réservation est confirmée pour :\n${equipmentList}\n\nDu ${formatDate(first.loan_date)} au ${formatDate(first.return_date)}.\n\nMédiathèque`,
+        text: `Bonjour ${first.first_name} ${first.name},\n\nVotre réservation est confirmée pour :\n${equipmentList}\n\nDu ${formatDate(first.loan_date)} au ${formatDate(first.return_date)}.\n\nPrendre contact avec la circonscription pour les modalités de récupération de l’emprunt.\n\nMédiathèque`,
       });
       let trackingStatus = 'saved';
       let trackingError = '';
@@ -100,11 +86,10 @@ export async function onRequestPost({ request, env }) {
         tracking_error: trackingError,
       });
     } catch (error) {
-      emailStatus = 'failed';
-      emailError = String(error.message || 'Erreur SMTP inconnue').slice(0, 200);
+      const emailError = String(error.message || 'Erreur SMTP inconnue').slice(0, 200);
       console.error('Échec du courriel de validation du matériel numérique :', emailError);
+      return Response.json({ approved: records.length, email_status: 'failed', email_error: emailError });
     }
-    return Response.json({ approved: records.length, email_status: emailStatus, email_error: emailError });
   } catch (error) {
     return Response.json({ detail: error.message }, { status: 503 });
   }

@@ -28,7 +28,8 @@ function normalizeDigitalEquipment(record) {
   const fields = record.fields || {};
   return {
     id: Number(record.id),
-    Equipement: fields.Equipement ?? '',
+    Equipement: fields.Nom_Equipement ?? fields.Equipement ?? '',
+    Nom_Equipement: fields.Nom_Equipement ?? fields.Equipement ?? '',
     Marque: fields.Marque ?? '',
     Type: fields.Type ?? '',
     quantity: Number(fields.Quantite ?? fields['Quantité'] ?? 0),
@@ -56,7 +57,7 @@ function normalizeDigitalLoan(record, inventoryRecords = []) {
     return_date: returnDate,
     occupied_until: releasedEarly ? addDays(returnDate, -1) : returnDate,
     equipment_id: equipmentId,
-    equipment_name: equipment?.fields?.Equipement || `Équipement ${equipmentId}`,
+    equipment_name: equipment?.fields?.Nom_Equipement || equipment?.fields?.Equipement || `Équipement ${equipmentId}`,
     quantity: digitalQuantity(fields),
     is_approved: fields.Validee === true || fields.Validee === 1,
     confirmation_sent: Boolean(fields.Confirmation_Envoyee),
