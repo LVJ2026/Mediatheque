@@ -10,12 +10,19 @@ async function gristRequest(env, table, init = {}) {
   const headers = new Headers(init.headers);
   headers.set('Authorization', `Bearer ${env.GRIST_API_KEY}`);
   if (init.body) headers.set('Content-Type', 'application/json');
-  const response = await fetch(gristUrl(env, table), { ...init, headers });
-  if (!response.ok) {
+  const isRead = !init.method || init.method.toUpperCase() === 'GET';
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const response = await fetch(gristUrl(env, table), { ...init, headers });
+    if (response.ok) return response.json();
+
     const detail = await response.text();
-    throw new Error(`Grist ${response.status}: ${detail.slice(0, 300)}`);
+    const sandboxClosed = response.status === 400 && detail.includes('PipeFromSandbox is closed');
+    if (!isRead || !sandboxClosed || attempt === 2) {
+      throw new Error(`Grist ${response.status}: ${detail.slice(0, 300)}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 150 * (attempt + 1)));
   }
-  return response.json();
+  throw new Error('Impossible de lire les données Grist.');
 }
 
 function assertConfigured(env) {
