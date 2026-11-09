@@ -32,7 +32,7 @@ async function loadDigital() {
   updatePendingReservationsButton();
   loadSchools();
   $('#digital-count').textContent = `${state.equipment.length} équipement${state.equipment.length > 1 ? 's' : ''}`;
-  $('#digital-body').innerHTML = state.equipment.map((item) => `<tr data-equipment-id="${item.id}"><td class="selection-cell"><input type="radio" name="digital-equipment" aria-label="Sélectionner ${escapeHtml(item.Equipement)}" ${Number(item.available_quantity) > 0 || state.manager ? '' : 'disabled'}></td><td><strong>${escapeHtml(item.Equipement)}</strong></td><td>${escapeHtml(item.Marque) || '—'}</td><td>${escapeHtml(item.Type) || '—'}</td><td>${escapeHtml(item.quantity)}</td><td class="digital-remaining">${escapeHtml(item.available_quantity)}</td></tr>`).join('');
+  $('#digital-body').innerHTML = state.equipment.map((item) => `<tr data-equipment-id="${item.id}"><td class="selection-cell"><input type="radio" name="digital-equipment" aria-label="Sélectionner ${escapeHtml(item.Equipement)}"></td><td><strong>${escapeHtml(item.Equipement)}</strong></td><td>${escapeHtml(item.Marque) || '—'}</td><td>${escapeHtml(item.Type) || '—'}</td><td>${escapeHtml(item.quantity)}</td><td class="digital-remaining">${escapeHtml(item.available_quantity)}</td></tr>`).join('');
   document.querySelectorAll('#digital-body tr').forEach((row) => {
     row.addEventListener('click', (event) => { if (!event.target.closest('input')) toggleEquipment(Number(row.dataset.equipmentId)); });
     const radio = row.querySelector('input[type="radio"]');
@@ -51,10 +51,7 @@ async function refreshDigitalData() {
   updatePendingReservationsButton();
   document.querySelectorAll('#digital-body tr').forEach((row) => {
     const item = state.equipment.find((equipment) => equipment.id === Number(row.dataset.equipmentId));
-    if (item) {
-      row.querySelector('.digital-remaining').textContent = item.available_quantity;
-      row.querySelector('input[type="radio"]').disabled = Number(item.available_quantity) <= 0 && !state.manager;
-    }
+    if (item) row.querySelector('.digital-remaining').textContent = item.available_quantity;
   });
 }
 async function loadBooks() {
@@ -215,7 +212,7 @@ function toggleBook(id) {
 }
 function toggleEquipment(id) {
   const equipment = state.equipment.find((item) => item.id === id);
-  if (!equipment || (!state.manager && Number(equipment.available_quantity) <= 0)) return;
+  if (!equipment) return;
   if (state.selectedEquipment.some((item) => item.id === id)) return;
   state.selectedEquipment = [{ ...equipment, requested_quantity: 1 }];
   const today = iso(new Date());
@@ -261,7 +258,7 @@ function clearEquipmentSelection() {
   state.selectedEquipment = [];
   document.querySelectorAll('#digital-body tr').forEach((row) => {
     row.classList.remove('selected');
-    row.querySelector('input[type="checkbox"]').checked = false;
+    row.querySelector('input[type="radio"]').checked = false;
   });
   $('#digital-empty-calendar').hidden = false;
   $('#digital-calendar-content').hidden = true;

@@ -60,7 +60,7 @@ export async function onRequestPost({ request, env }) {
       await sendMail(env, {
         to: first.professional_email,
         subject: 'Confirmation de votre réservation de matériel numérique',
-        text: `Bonjour ${first.first_name} ${first.name},\n\nVotre réservation est confirmée pour :\n${equipmentList}\n\nDu ${formatDate(first.loan_date)} au ${formatDate(first.return_date)}.\n\nPrendre contact avec la circonscription pour les modalités de récupération de l’emprunt.\n\nMédiathèque`,
+        text: `Bonjour ${first.first_name} ${first.name},\n\nVotre réservation est confirmée pour :\n${equipmentList}\n\nDu ${formatDate(first.loan_date)} au ${formatDate(first.return_date)}.\n\nPrendre contact avec la circonscription pour les modalités de récupération de l’emprunt.`,
       });
       let trackingStatus = 'saved';
       let trackingError = '';

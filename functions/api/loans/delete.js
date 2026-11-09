@@ -57,7 +57,7 @@ export async function onRequestPost({ request, env, waitUntil }) {
         await sendMail(env, {
           to,
           subject: 'Annulation de votre réservation',
-          text: 'Bonjour,\n\nVotre réservation a été annulée. Pour connaître les raisons de cette annulation, veuillez prendre contact avec la circonscription.\n\nMédiathèque',
+          text: 'Bonjour,\n\nVotre réservation a été annulée. Pour connaître les raisons de cette annulation, veuillez prendre contact avec la circonscription.',
         });
         sentRecipients += 1;
       } catch (error) {

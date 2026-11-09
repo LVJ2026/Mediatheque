@@ -24,7 +24,7 @@ async function sendConfirmationEmail(env, input) {
     await sendMail(env, {
       to: input.professional_email,
       subject: 'Confirmation de votre réservation',
-      text: `Bonjour ${input.first_name} ${input.name},\n\nVotre réservation est confirmée pour :\n${gameList}\n\nDu ${formatDate(input.loan_date)} au ${formatDate(input.end_date)}.\n\nMédiathèque`,
+      text: `Bonjour ${input.first_name} ${input.name},\n\nVotre réservation est confirmée pour :\n${gameList}\n\nDu ${formatDate(input.loan_date)} au ${formatDate(input.end_date)}.`,
     });
     return { sent: true, error: '' };
   } catch (error) {

@@ -36,7 +36,7 @@ async function sendRequestEmail(env, input, selection, inventoryById, created) {
     await sendMail(env, {
       to: input.professional_email,
       subject: 'Réception de votre demande de réservation de matériel numérique',
-      text: `Bonjour ${input.first_name} ${input.name},\n\nNous avons bien reçu votre demande de réservation pour :\n${equipmentList}\n\n${dateRange}\nCette demande est en attente de validation par le gestionnaire. Vous recevrez un courriel lorsque la réservation sera validée.\n\nMédiathèque`,
+      text: `Bonjour ${input.first_name} ${input.name},\n\nNous avons bien reçu votre demande de réservation pour :\n${equipmentList}\n\n${dateRange}\nCette demande est en attente de validation par le gestionnaire. Vous recevrez un courriel lorsque la réservation sera validée.`,
     });
   } catch (error) {
     borrowerStatus = 'failed';
@@ -82,7 +82,7 @@ async function sendRequestEmail(env, input, selection, inventoryById, created) {
         await sendMail(env, {
           to: email,
           subject: 'Nouvelle pré-réservation de matériel numérique à valider',
-          text: `Une nouvelle pré-réservation de matériel numérique attend votre validation.\n\nDemandeur : ${input.first_name} ${input.name}\nÉcole : ${input.school}\nCourriel : ${input.professional_email}\n${dateRange}\n\nMatériel demandé :\n${equipmentList}\n\nOuvrir l’interface gestionnaire : ${interfaceUrl}\n\nMédiathèque`,
+          text: `Une nouvelle pré-réservation de matériel numérique attend votre validation.\n\nDemandeur : ${input.first_name} ${input.name}\nÉcole : ${input.school}\nCourriel : ${input.professional_email}\n${dateRange}\n\nMatériel demandé :\n${equipmentList}\n\nOuvrir l’interface gestionnaire : ${interfaceUrl}`,
         });
         managerSent += 1;
       } catch (error) {

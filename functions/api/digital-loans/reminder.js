@@ -53,7 +53,7 @@ export async function onRequestPost({ request, env }) {
     await sendMail(env, {
       to: first.professional_email,
       subject: 'Rappel : retour de votre matériel numérique',
-      text: `Bonjour ${first.first_name} ${first.name},\n\nSauf erreur de notre part, le matériel suivant devait être rendu le ${formatDate(dueDate)} :\n${equipmentList}\n\nMerci de prendre contact avec la circonscription pour organiser son retour.\n\nMédiathèque`,
+      text: `Bonjour ${first.first_name} ${first.name},\n\nSauf erreur de notre part, le matériel suivant devait être rendu le ${formatDate(dueDate)} :\n${equipmentList}\n\nMerci de prendre contact avec la circonscription pour organiser son retour.`,
     });
     return Response.json({ sent: true });
   } catch (error) {

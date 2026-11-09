@@ -20,7 +20,7 @@ async function sendReservationConfirmation(env, input, records, created, invento
     await sendMail(env, {
       to: input.professional_email,
       subject: 'Confirmation de votre réservation de livres et albums',
-      text: `Bonjour ${input.first_name} ${input.name},\n\nVotre réservation est confirmée pour :\n${books}\n\nDu ${formatDate(input.loan_date)} au ${formatDate(input.end_date)}.\n\nMédiathèque`,
+      text: `Bonjour ${input.first_name} ${input.name},\n\nVotre réservation est confirmée pour :\n${books}\n\nDu ${formatDate(input.loan_date)} au ${formatDate(input.end_date)}.`,
     });
     const ids = (created.records || []).map((record) => record.id).filter((id) => Number.isInteger(id));
     if (ids.length) {
