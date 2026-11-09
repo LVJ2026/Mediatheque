@@ -16,6 +16,23 @@ function digitalEquipmentId(fields) {
   return Number(fields.Equipement);
 }
 
+function remainingDigitalQuantity(equipment, total, activeLoans) {
+  const equipmentId = Number(equipment.id);
+  const totalQuantity = Number(total);
+  if (!Number.isFinite(totalQuantity) || totalQuantity <= 0) return 0;
+  const borrowed = activeLoans
+    .filter((record) => digitalEquipmentId(record.fields || {}) === equipmentId)
+    .reduce((sum, record) => sum + digitalQuantity(record.fields || {}), 0);
+  if (!Number.isFinite(borrowed)) return 0;
+  const calculatedRemaining = Math.max(0, totalQuantity - borrowed);
+  const fields = equipment.fields || {};
+  const gristRemaining = fields.Reste ?? fields['Reste'];
+  if (gristRemaining == null) return calculatedRemaining;
+  const parsedRemaining = Number(gristRemaining);
+  if (!Number.isFinite(parsedRemaining)) return 0;
+  return Math.min(calculatedRemaining, Math.max(0, parsedRemaining));
+}
+
 function isActiveDigitalLoan(fields) {
   return Number(fields.Equipement) > 0
     && fields.Date_Emprunt != null
@@ -136,5 +153,6 @@ export {
   loadDigitalStock,
   normalizeDigitalEquipment,
   normalizeDigitalLoan,
+  remainingDigitalQuantity,
   syncDigitalAvailability,
 };

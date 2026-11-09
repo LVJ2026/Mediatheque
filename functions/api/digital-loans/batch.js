@@ -4,6 +4,7 @@ import {
   digitalLoansTable,
   loadDigitalStock,
   normalizeDigitalLoan,
+  remainingDigitalQuantity,
   syncDigitalAvailability,
 } from '../../_digital.js';
 import { sendMail } from '../../_mail.js';
@@ -133,9 +134,12 @@ export async function onRequestPost({ request, env }) {
       const id = Number(item.id);
       const equipment = inventoryById.get(id);
       if (!equipment) return Response.json({ detail: 'Un équipement sélectionné est introuvable dans l’inventaire.' }, { status: 409 });
-      const remaining = equipment.fields?.Reste ?? equipment.fields?.['Reste'];
-      if (remaining != null && Number(remaining) <= 0) {
+      const currentRemaining = remainingDigitalQuantity(equipment, totals.get(id) ?? 0, activeLoans);
+      if (currentRemaining === 0) {
         return Response.json({ detail: `${equipment.fields?.Nom_Equipement || equipment.fields?.Equipement || `L’équipement ${id}`} n’est plus disponible à l’emprunt.` }, { status: 409 });
+      }
+      if (Number(item.quantity) > currentRemaining) {
+        return Response.json({ detail: `Le stock restant est insuffisant pour ${equipment.fields?.Nom_Equipement || equipment.fields?.Equipement || `l’équipement ${id}`} (${currentRemaining} disponible(s)).` }, { status: 409 });
       }
       const total = totals.get(id) ?? 0;
       if (availableDigitalQuantity(id, input.loan_date, input.end_date, total, normalizedLoans) < Number(item.quantity)) {
