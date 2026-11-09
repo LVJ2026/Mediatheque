@@ -32,13 +32,36 @@ async function loadDigital() {
   updatePendingReservationsButton();
   loadSchools();
   $('#digital-count').textContent = `${state.equipment.length} équipement${state.equipment.length > 1 ? 's' : ''}`;
+  const typeFilter = $('#digital-type-filter');
+  const selectedType = typeFilter.value;
+  const types = [...new Set(state.equipment.map((item) => String(item.Type ?? '').trim()).filter(Boolean))]
+    .sort((first, second) => first.localeCompare(second, 'fr'));
+  typeFilter.replaceChildren(new Option('Tous les types', ''), ...types.map((type) => new Option(type, type)));
+  if (types.includes(selectedType)) typeFilter.value = selectedType;
+  if (!typeFilter.dataset.bound) {
+    typeFilter.addEventListener('change', filterDigitalEquipmentByType);
+    typeFilter.dataset.bound = 'true';
+  }
   $('#digital-body').innerHTML = state.equipment.map((item) => `<tr data-equipment-id="${item.id}"><td class="selection-cell"><input type="radio" name="digital-equipment" aria-label="Sélectionner ${escapeHtml(item.Equipement)}"></td><td><strong>${escapeHtml(item.Equipement)}</strong></td><td>${escapeHtml(item.Marque) || '—'}</td><td>${escapeHtml(item.Type) || '—'}</td><td>${escapeHtml(item.quantity)}</td><td class="digital-remaining">${escapeHtml(item.available_quantity)}</td></tr>`).join('');
+  filterDigitalEquipmentByType();
   document.querySelectorAll('#digital-body tr').forEach((row) => {
     row.addEventListener('click', (event) => { if (!event.target.closest('input')) toggleEquipment(Number(row.dataset.equipmentId)); });
     const radio = row.querySelector('input[type="radio"]');
     radio.addEventListener('click', (event) => event.stopPropagation());
     radio.addEventListener('change', () => toggleEquipment(Number(row.dataset.equipmentId)));
   });
+}
+function filterDigitalEquipmentByType() {
+  const selectedType = $('#digital-type-filter').value;
+  let selectedEquipmentHidden = false;
+  document.querySelectorAll('#digital-body tr').forEach((row) => {
+    const matches = !selectedType || row.children[3].textContent.trim() === selectedType;
+    row.hidden = !matches;
+    if (!matches && state.selectedEquipment.some((item) => item.id === Number(row.dataset.equipmentId))) {
+      selectedEquipmentHidden = true;
+    }
+  });
+  if (selectedEquipmentHidden) clearEquipmentSelection();
 }
 async function refreshDigitalData() {
   const [inventoryResponse, loansResponse] = await Promise.all([
