@@ -24,9 +24,27 @@ function ensureManagerBookingsModal() {
     modal.id = 'manager-bookings-modal';
     modal.className = 'modal-backdrop';
     modal.hidden = true;
-    modal.innerHTML = '<div class="modal manage-modal" role="dialog" aria-modal="true"><button class="modal-close" type="button" aria-label="Fermer">×</button><p class="eyebrow">Espace gestionnaire</p><h2>Réservations jeux et livres / albums</h2><div id="manager-bookings-list"></div></div>';
+    modal.innerHTML = '<div class="modal manage-modal" role="dialog" aria-modal="true"><button class="modal-close" type="button" aria-label="Fermer">×</button><p class="eyebrow">Espace gestionnaire</p><h2>Réservations jeux et livres / albums</h2><label class="digital-type-filter" for="manager-booking-type">Filtrer par type<select id="manager-booking-type"><option value="">Tous les types</option><option value="games">Jeux</option><option value="books">Livres / albums</option></select></label><div id="manager-bookings-list"></div></div>';
     modal.querySelector('.modal-close').addEventListener('click', () => { modal.hidden = true; });
     modal.addEventListener('click', (event) => { if (event.target === modal) modal.hidden = true; });
+    modal.querySelector('#manager-booking-type').addEventListener('change', () => {
+      const selectedType = modal.querySelector('#manager-booking-type').value;
+      const rows = [...modal.querySelectorAll('#manager-bookings-list tbody tr')];
+      let visibleCount = 0;
+      rows.forEach((row) => {
+        row.hidden = selectedType !== '' && row.dataset.collection !== selectedType;
+        if (!row.hidden) visibleCount += 1;
+      });
+      const table = modal.querySelector('#manager-bookings-list table');
+      const emptyMessage = modal.querySelector('#manager-bookings-empty');
+      if (table) table.closest('.table-wrap').hidden = visibleCount === 0;
+      if (emptyMessage) {
+        emptyMessage.hidden = visibleCount > 0;
+        emptyMessage.textContent = rows.length && selectedType
+          ? `Aucune réservation de ${selectedType === 'games' ? 'jeux' : 'livres / albums'}.`
+          : 'Aucune réservation de jeu ou de livre / album.';
+      }
+    });
     document.body.append(modal);
   }
   return modal;
@@ -100,14 +118,15 @@ async function showManagerBookings() {
     await loadManagerBookings();
     const bookings = [...allBookings('games'), ...allBookings('books')]
       .sort((first, second) => second.loan_date.localeCompare(first.loan_date));
+    modal.querySelector('#manager-booking-type').value = '';
     if (!bookings.length) {
-      list.innerHTML = '<p class="modal-note">Aucune réservation de jeu ou de livre / album.</p>';
+      list.innerHTML = '<p class="modal-note" id="manager-bookings-empty">Aucune réservation de jeu ou de livre / album.</p>';
       return;
     }
     list.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Collection</th><th>Ressources</th><th>Emprunteur</th><th>Période</th><th></th></tr></thead><tbody>${bookings.map((booking, index) => {
       const resources = bookingResources(booking).map(escapeHtml).join(', ');
-      return `<tr><td>${booking.collection === 'books' ? 'Livres / albums' : 'Jeux'}</td><td>${resources}</td><td>${escapeHtml(booking.first_name)} ${escapeHtml(booking.name)}</td><td>Du ${formatDate(booking.loan_date)} au ${formatDate(booking.return_date)}</td><td><button class="secondary-button" data-manager-booking="${index}" type="button">Gérer</button></td></tr>`;
-    }).join('')}</tbody></table></div>`;
+      return `<tr data-collection="${booking.collection}"><td>${booking.collection === 'books' ? 'Livres / albums' : 'Jeux'}</td><td>${resources}</td><td>${escapeHtml(booking.first_name)} ${escapeHtml(booking.name)}</td><td>Du ${formatDate(booking.loan_date)} au ${formatDate(booking.return_date)}</td><td><button class="secondary-button" data-manager-booking="${index}" type="button">Gérer</button></td></tr>`;
+    }).join('')}</tbody></table></div><p class="modal-note" id="manager-bookings-empty" hidden></p>`;
     list.querySelectorAll('[data-manager-booking]').forEach((button) => button.addEventListener('click', () => {
       const booking = bookings[Number(button.dataset.managerBooking)];
       if (booking) {
