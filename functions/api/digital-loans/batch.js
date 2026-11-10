@@ -134,8 +134,13 @@ export async function onRequestPost({ request, env }) {
       const equipment = inventoryById.get(id);
       if (!equipment) return Response.json({ detail: 'Un équipement sélectionné est introuvable dans l’inventaire.' }, { status: 409 });
       const total = totals.get(id) ?? 0;
-      if (availableDigitalQuantity(id, input.loan_date, input.end_date, total, normalizedLoans) < Number(item.quantity)) {
-        return Response.json({ detail: `Stock insuffisant pour ${equipment.fields?.Nom_Equipement || equipment.fields?.Equipement || `l’équipement ${id}`} sur cette période.` }, { status: 409 });
+      const available = availableDigitalQuantity(id, input.loan_date, input.end_date, total, normalizedLoans);
+      if (available < Number(item.quantity)) {
+        const equipmentName = equipment.fields?.Nom_Equipement || equipment.fields?.Equipement || `l’équipement ${id}`;
+        const unit = available === 1 ? 'exemplaire disponible' : 'exemplaires disponibles';
+        return Response.json({
+          detail: `Stock insuffisant pour ${equipmentName} : ${available} ${unit} sur la période choisie.`,
+        }, { status: 409 });
       }
     }
 

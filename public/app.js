@@ -486,7 +486,11 @@ function renderDigitalQuantityFields(startDate, endDate) {
     const equipment = state.selectedEquipment.find((item) => item.id === Number(input.dataset.digitalQuantity));
     if (!equipment) return;
     const maximum = Number(input.max);
-    equipment.requested_quantity = Math.min(maximum, Math.max(1, Number(input.value) || 1));
+    const requested = Number(input.value) || 1;
+    if (requested > maximum) {
+      alert(`${equipment.Equipement} : seulement ${maximum} exemplaire${maximum === 1 ? '' : 's'} disponible${maximum === 1 ? '' : 's'} pour la période choisie.`);
+    }
+    equipment.requested_quantity = Math.min(maximum, Math.max(1, Math.floor(requested)));
     input.value = equipment.requested_quantity;
     $('#loan-form').dataset.digitalSelection = selectionPayload();
   }));
@@ -553,6 +557,9 @@ async function submitLoan(event) {
   const result = await response.json();
   if (!response.ok) {
     printWindow?.close();
+    if (isDigital && response.status === 409 && result.detail?.startsWith('Stock insuffisant')) {
+      alert(result.detail);
+    }
     $('#form-error').textContent = result.detail || 'La réservation n’a pas pu être enregistrée.';
     return;
   }
