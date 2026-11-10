@@ -62,6 +62,10 @@ async function sendReminders(env, now) {
   const bookStarts = new Map();
   const bookReturns = new Map();
   const digitalReturns = new Map();
+  const overdueGames = new Map();
+  const overdueBooks = new Map();
+  const gameConfirmations = new Map();
+  const bookConfirmations = new Map();
 
   for (const record of payload.records || []) {
     const fields = record.fields || {};
@@ -70,9 +74,25 @@ async function sendReminders(env, now) {
     if (hasDate(fields.Retour) || hasDate(fields.Date_Annulation)) continue;
 
     const loan = normalizeLoan(record);
-    if (loan.return_date !== reminderDate) continue;
-
     const key = reminderKey(loan);
+    if (hasDate(fields.Confirmation_Demandee) && !hasDate(fields.Confirmation_Envoyee)) {
+      if (!gameConfirmations.has(key)) {
+        gameConfirmations.set(key, { borrower: loan, records: [], gameIds: new Set() });
+      }
+      const confirmation = gameConfirmations.get(key);
+      confirmation.records.push(record);
+      confirmation.gameIds.add(loan.game_id);
+    }
+    if (loan.return_date < today) {
+      if (!overdueGames.has(key)) {
+        overdueGames.set(key, { borrower: loan, records: [], gameIds: new Set(), alreadySent: false });
+      }
+      const overdue = overdueGames.get(key);
+      overdue.records.push(record);
+      overdue.gameIds.add(loan.game_id);
+      overdue.alreadySent ||= hasDate(fields.Retard_Notification_Envoyee);
+    }
+    if (loan.return_date !== reminderDate) continue;
     if (!groups.has(key)) {
       groups.set(key, {
         borrower: loan,
@@ -92,7 +112,16 @@ async function sendReminders(env, now) {
     if (!isActiveBookLoan(fields)) continue;
     const loan = normalizeBookLoan(record, bookInventory.records || []);
     const key = reminderKey(loan);
-    if (loan.loan_date === today && !hasDate(fields.Confirmation_Envoyee)) {
+    if (hasDate(fields.Confirmation_Demandee) && !hasDate(fields.Confirmation_Envoyee)) {
+      if (!bookConfirmations.has(key)) {
+        bookConfirmations.set(key, { borrower: loan, records: [], quantities: new Map() });
+      }
+      const confirmation = bookConfirmations.get(key);
+      confirmation.records.push(record);
+      confirmation.quantities.set(loan.book_id, (confirmation.quantities.get(loan.book_id) || 0) + loan.quantity);
+    }
+    if (loan.loan_date === today && !hasDate(fields.Confirmation_Envoyee)
+      && !hasDate(fields.Confirmation_Demandee)) {
       if (!bookStarts.has(key)) bookStarts.set(key, { borrower: loan, records: [], quantities: new Map() });
       const group = bookStarts.get(key);
       group.records.push(record);
@@ -104,10 +133,20 @@ async function sendReminders(env, now) {
       group.records.push(record);
       group.quantities.set(loan.book_id, (group.quantities.get(loan.book_id) || 0) + loan.quantity);
     }
+    if (loan.return_date < today) {
+      if (!overdueBooks.has(key)) {
+        overdueBooks.set(key, { borrower: loan, records: [], quantities: new Map(), alreadySent: false });
+      }
+      const overdue = overdueBooks.get(key);
+      overdue.records.push(record);
+      overdue.quantities.set(loan.book_id, (overdue.quantities.get(loan.book_id) || 0) + loan.quantity);
+      overdue.alreadySent ||= hasDate(fields.Retard_Notification_Envoyee);
+    }
   }
 
   const dueGroups = [...groups.values()].filter((group) => !group.alreadySent);
-  const dueBookGroups = [...bookStarts.values()].map((group) => ({ ...group, notice: 'start' }))
+  const dueBookGroups = [...bookConfirmations.values()].map((group) => ({ ...group, notice: 'confirmation' }))
+    .concat([...bookStarts.values()].map((group) => ({ ...group, notice: 'start' })))
     .concat([...bookReturns.values()].map((group) => ({ ...group, notice: 'return' })));
   for (const record of digitalPayload.records || []) {
     const fields = record.fields || {};
@@ -124,7 +163,11 @@ async function sendReminders(env, now) {
     group.alreadySent ||= hasDate(fields.Rappel_Envoye);
   }
   const dueDigitalGroups = [...digitalReturns.values()].filter((group) => !group.alreadySent);
-  if (!dueGroups.length && !dueBookGroups.length && !dueDigitalGroups.length) return;
+  const dueOverdueGames = [...overdueGames.values()].filter((group) => !group.alreadySent);
+  const dueOverdueBooks = [...overdueBooks.values()].filter((group) => !group.alreadySent);
+  if (!dueGroups.length && !dueBookGroups.length && !dueDigitalGroups.length
+    && !dueOverdueGames.length && !dueOverdueBooks.length
+    && !gameConfirmations.size && !bookConfirmations.size) return;
 
   const gamesById = new Map();
   try {
@@ -161,6 +204,30 @@ async function sendReminders(env, now) {
     }
   }
 
+  for (const group of gameConfirmations.values()) {
+    const loan = group.borrower;
+    const gameList = [...group.gameIds].map((id) => `- ${gamesById.get(id) || `Jeu ${id}`}`).join('\n');
+    try {
+      await sendMail(env, {
+        to: loan.professional_email,
+        subject: 'Confirmation de votre réservation',
+        text: `Bonjour ${loan.first_name} ${loan.name},\n\nVotre réservation est confirmée pour :\n${gameList}\n\nDu ${formatDate(loan.loan_date)} au ${formatDate(loan.return_date)}.`,
+      });
+      await gristRequest(env, table, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          records: group.records.map((record) => ({
+            id: record.id,
+            fields: { Confirmation_Envoyee: today },
+          })),
+        }),
+      });
+      console.log(`Confirmation de réservation envoyée pour ${loan.professional_email}.`);
+    } catch (error) {
+      console.error(`Échec de la confirmation de réservation pour ${loan.professional_email} :`, error.message);
+    }
+  }
+
   if (dueBookGroups.length) {
     const booksById = new Map();
     for (const record of bookInventory.records || []) {
@@ -171,24 +238,85 @@ async function sendReminders(env, now) {
       const loan = group.borrower;
       const bookList = [...group.quantities].map(([id, quantity]) => `- ${booksById.get(id) || `Série ${id}`} × ${quantity}`).join('\n');
       const isStart = group.notice === 'start';
+      const isReturn = group.notice === 'return';
       try {
         await sendMail(env, {
           to: loan.professional_email,
-          subject: isStart ? 'Confirmation de votre emprunt de livres et albums' : 'Rappel : retour de vos séries dans 3 jours',
-          text: isStart
-            ? `Bonjour ${loan.first_name} ${loan.name},\n\nVotre emprunt commence aujourd’hui pour :\n${bookList}\n\nLe retour est prévu le ${formatDate(loan.return_date)}.\n\nMédiathèque`
-            : `Bonjour ${loan.first_name} ${loan.name},\n\nNous vous rappelons que le retour prévu pour :\n${bookList}\nest le ${formatDate(loan.return_date)}.\n\nMédiathèque`,
+          subject: isReturn ? 'Rappel : retour de vos séries dans 3 jours' : 'Confirmation de votre réservation de livres et albums',
+          text: isReturn
+            ? `Bonjour ${loan.first_name} ${loan.name},\n\nNous vous rappelons que le retour prévu pour :\n${bookList}\nest le ${formatDate(loan.return_date)}.\n\nMédiathèque`
+            : isStart
+              ? `Bonjour ${loan.first_name} ${loan.name},\n\nVotre emprunt commence aujourd’hui pour :\n${bookList}\n\nLe retour est prévu le ${formatDate(loan.return_date)}.\n\nMédiathèque`
+              : `Bonjour ${loan.first_name} ${loan.name},\n\nVotre réservation est confirmée pour :\n${bookList}\n\nDu ${formatDate(loan.loan_date)} au ${formatDate(loan.return_date)}.\n\nMédiathèque`,
         });
-        const marker = isStart ? { Confirmation_Envoyee: today } : { Rappel_Envoye: today };
+        const marker = isReturn ? { Rappel_Envoye: today } : { Confirmation_Envoyee: today };
         await gristRequest(env, bookLoansTable(env), {
           method: 'PATCH',
           body: JSON.stringify({ records: group.records.map((record) => ({ id: record.id, fields: marker })) }),
         });
-        console.log(`${isStart ? 'Confirmation' : 'Rappel'} envoyé pour ${loan.professional_email} (${loan.return_date}).`);
+        console.log(`${isReturn ? 'Rappel' : 'Confirmation'} envoyé pour ${loan.professional_email} (${loan.return_date}).`);
       } catch (error) {
         console.error(`Échec du courriel pour ${loan.professional_email} :`, error.message);
       }
 
+    }
+  }
+
+  if (dueOverdueGames.length || dueOverdueBooks.length) {
+    const managerEmails = [...new Set([env.MANAGER_EMAIL1, env.MANAGER_EMAIL2]
+      .map((email) => typeof email === 'string' ? email.trim() : '')
+      .filter(Boolean))];
+    if (!managerEmails.length) {
+      console.error('Alertes de retard non envoyées : aucune adresse MANAGER_EMAIL1 ou MANAGER_EMAIL2 n’est configurée.');
+    } else {
+      const interfaceUrl = new URL('/#home', env.MANAGER_INTERFACE_URL || 'https://mediatheque-reservations.pages.dev').href;
+      const booksById = new Map((bookInventory.records || []).map((record) => [
+        Number(record.id), record.fields?.Titre || `Série ${record.id}`,
+      ]));
+      const gameAlerts = dueOverdueGames.map((group) => ({
+        group,
+        table,
+        resourceLines: [...group.gameIds].map((id) => `- ${gamesById.get(id) || `Jeu ${id}`}`),
+        collection: 'jeux',
+      }));
+      const bookAlerts = dueOverdueBooks.map((group) => ({
+        group,
+        table: bookLoansTable(env),
+        resourceLines: [...group.quantities].map(([id, quantity]) => `- ${booksById.get(id) || `Série ${id}`} × ${quantity}`),
+        collection: 'livres / albums',
+      }));
+      for (const { group, table: loanTable, resourceLines, collection } of [...gameAlerts, ...bookAlerts]) {
+        const loan = group.borrower;
+        const text = `Une réservation de ${collection} est en retard.\n\nEmprunteur : ${loan.first_name} ${loan.name}\nÉcole : ${loan.school}\nCourriel : ${loan.professional_email}\nRéservation :\n${resourceLines.join('\n')}\nDate de retour prévue : ${formatDate(loan.return_date)}\n\nOuvrir l’interface de gestion : ${interfaceUrl}`;
+        let allSent = true;
+        for (const to of managerEmails) {
+          try {
+            await sendMail(env, {
+              to,
+              subject: `Retard de retour – réservation de ${collection}`,
+              text,
+            });
+          } catch (error) {
+            allSent = false;
+            console.error(`Échec de l’alerte de retard pour ${to} (${loan.professional_email}) :`, error.message);
+          }
+        }
+        if (!allSent) continue;
+        try {
+          await gristRequest(env, loanTable, {
+            method: 'PATCH',
+            body: JSON.stringify({
+              records: group.records.map((record) => ({
+                id: record.id,
+                fields: { Retard_Notification_Envoyee: today },
+              })),
+            }),
+          });
+          console.log(`Alerte de retard envoyée pour ${loan.professional_email} (${loan.return_date}).`);
+        } catch (error) {
+          console.error(`Alerte envoyée, mais suivi Grist impossible pour ${loan.professional_email} :`, error.message);
+        }
+      }
     }
   }
 

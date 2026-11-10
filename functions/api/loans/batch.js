@@ -1,13 +1,24 @@
 import { assertConfigured, gristRequest, normalizeLoan } from '../../_grist.js';
 import { sendMail } from '../../_mail.js';
 
+function dateInParis(date) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Paris',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
 function isValidDate(value) {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
   const date = new Date(`${value}T12:00:00`);
   return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
 }
 
-async function sendConfirmationEmail(env, input) {
+async function sendConfirmationEmail(env, input, created) {
   try {
     const gamesById = new Map();
     try {
@@ -25,6 +36,14 @@ async function sendConfirmationEmail(env, input) {
       to: input.professional_email,
       subject: 'Confirmation de votre réservation',
       text: `Bonjour ${input.first_name} ${input.name},\n\nVotre réservation est confirmée pour :\n${gameList}\n\nDu ${formatDate(input.loan_date)} au ${formatDate(input.end_date)}.`,
+    });
+    const ids = (created.records || []).map((record) => record.id).filter(Number.isInteger);
+    if (!ids.length) throw new Error('Les identifiants Grist des réservations sont indisponibles.');
+    await gristRequest(env, env.GRIST_LOANS_TABLE || 'Emprunts', {
+      method: 'PATCH',
+      body: JSON.stringify({
+        records: ids.map((id) => ({ id, fields: { Confirmation_Envoyee: dateInParis(new Date()) } })),
+      }),
     });
     return { sent: true, error: '' };
   } catch (error) {
@@ -62,6 +81,7 @@ export async function onRequestPost({ request, env, waitUntil }) {
       Date_Emprunt: input.loan_date,
       Date_Fin: input.end_date,
       Jeu: Number(gameId),
+      Confirmation_Demandee: dateInParis(new Date()),
     }}));
     const created = await gristRequest(env, env.GRIST_LOANS_TABLE || 'Emprunts', {
       method: 'POST',
@@ -72,7 +92,7 @@ export async function onRequestPost({ request, env, waitUntil }) {
       fields: records[index].fields,
     }));
 
-    const emailTask = sendConfirmationEmail(env, input);
+    const emailTask = sendConfirmationEmail(env, input, created);
     if (waitUntil) {
       waitUntil(emailTask);
       return Response.json(loans, { status: 201, headers: { 'X-Email-Status': 'sending' } });

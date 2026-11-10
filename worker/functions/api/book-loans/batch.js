@@ -102,6 +102,7 @@ export async function onRequestPost({ request, env, waitUntil }) {
       Date_Fin: input.end_date,
       Titre: Number(item.id),
       Quantite: Number(item.quantity),
+      Confirmation_Demandee: dateInParis(new Date()),
     } }));
     const created = await gristRequest(env, bookLoansTable(env), {
       method: 'POST',
