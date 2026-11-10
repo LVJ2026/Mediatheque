@@ -311,9 +311,7 @@ function bookAvailabilityForDate(book, date) {
 function digitalAvailabilityForDate(equipment, date) {
   const bookings = state.digitalLoans.filter((loan) => loan.equipment_id === equipment.id
     && loan.loan_date <= date && date <= (loan.occupied_until || loan.return_date));
-  const total = Number(equipment.available_quantity) <= 0
-    ? 0
-    : Math.max(0, Number(equipment.quantity) || 0);
+  const total = Math.max(0, Number(equipment.quantity) || 0);
   const approvedQuantity = bookings
     .filter((loan) => loan.is_approved)
     .reduce((sum, loan) => sum + loan.quantity, 0);
