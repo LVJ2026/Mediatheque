@@ -86,11 +86,13 @@ async function loadDigitalStock(env) {
   return { inventory, loans, totals, activeLoans };
 }
 
-async function syncDigitalAvailability(env, totals) {
-  const [inventory, loans] = await Promise.all([
-    gristRequest(env, digitalInventoryTable(env)),
-    gristRequest(env, digitalLoansTable(env)),
-  ]);
+async function syncDigitalAvailability(env, totals, inventoryPayload, loansPayload) {
+  const [inventory, loans] = inventoryPayload && loansPayload
+    ? [inventoryPayload, loansPayload]
+    : await Promise.all([
+      gristRequest(env, digitalInventoryTable(env)),
+      gristRequest(env, digitalLoansTable(env)),
+    ]);
   const borrowed = new Map([...totals.keys()].map((id) => [id, 0]));
   for (const record of loans.records || []) {
     const fields = record.fields || {};
@@ -100,6 +102,7 @@ async function syncDigitalAvailability(env, totals) {
   }
   const records = (inventory.records || [])
     .filter((record) => totals.has(Number(record.id)))
+    .filter((record) => Number(record.fields?.Qte_empruntee ?? 0) !== borrowed.get(Number(record.id)))
     .map((record) => ({
       id: record.id,
       fields: { Qte_empruntee: borrowed.get(Number(record.id)) },
@@ -110,6 +113,7 @@ async function syncDigitalAvailability(env, totals) {
       body: JSON.stringify({ records }),
     });
   }
+  return borrowed;
 }
 
 function overlapsDigitalLoan(loan, start, end) {
