@@ -17,6 +17,108 @@ async function loadGames() {
   $('#games-body').innerHTML = state.games.map((game) => `<tr data-game-id="${game.id}"><td class="selection-cell"><input type="checkbox" aria-label="Sélectionner ${escapeHtml(game.Jeu)}"></td><td><strong>${escapeHtml(game.Jeu)}</strong></td><td>${escapeHtml(game.Marque) || '—'}</td><td>${escapeHtml(game['Âge indiqué']) || '—'}</td><td>${escapeHtml(game.Joueurs) || '—'}</td><td>${escapeHtml(game.Remarques) || '—'}</td></tr>`).join('');
   document.querySelectorAll('#games-body tr').forEach((row) => { row.addEventListener('click', () => toggleGame(Number(row.dataset.gameId))); const checkbox = row.querySelector('input'); checkbox.addEventListener('click', (event) => event.stopPropagation()); checkbox.addEventListener('change', () => toggleGame(Number(row.dataset.gameId))); });
 }
+function ensureManagerBookingsModal() {
+  let modal = $('#manager-bookings-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'manager-bookings-modal';
+    modal.className = 'modal-backdrop';
+    modal.hidden = true;
+    modal.innerHTML = '<div class="modal manage-modal" role="dialog" aria-modal="true"><button class="modal-close" type="button" aria-label="Fermer">×</button><p class="eyebrow">Espace gestionnaire</p><h2>Réservations jeux et livres / albums</h2><div id="manager-bookings-list"></div></div>';
+    modal.querySelector('.modal-close').addEventListener('click', () => { modal.hidden = true; });
+    modal.addEventListener('click', (event) => { if (event.target === modal) modal.hidden = true; });
+    document.body.append(modal);
+  }
+  return modal;
+}
+async function loadManagerBookings() {
+  const updates = [];
+  if (!state.games.length) updates.push(loadGames());
+  else updates.push(fetch('/api/loans', { cache: 'no-store' }).then(async (response) => {
+    if (!response.ok) throw new Error('Impossible de charger les réservations de jeux.');
+    state.loans = await response.json();
+  }));
+  if (!state.books.length) updates.push(loadBooks());
+  else updates.push(fetch('/api/book-loans', { cache: 'no-store' }).then(async (response) => {
+    if (!response.ok) throw new Error('Impossible de charger les réservations de livres et albums.');
+    state.bookLoans = await response.json();
+  }));
+  await Promise.all(updates);
+}
+function openManagerBooking(booking) {
+  state.collection = booking.collection;
+  state.month = new Date(`${booking.loan_date}T12:00:00`);
+  state.selectedGames = booking.collection === 'games'
+    ? state.games.filter((game) => booking.entries.some((loan) => loan.game_id === Number(game.id)))
+    : [];
+  state.selectedBooks = booking.collection === 'books'
+    ? booking.entries.map((loan) => {
+      const book = state.books.find((item) => item.id === loan.book_id);
+      return book ? { ...book, requested_quantity: loan.quantity } : null;
+    }).filter(Boolean)
+    : [];
+  const targetHash = booking.collection === 'books' ? '#series' : '#jeux';
+  if (location.hash !== targetHash) location.hash = targetHash;
+  route();
+  if (booking.collection === 'games') {
+    document.querySelectorAll('#games-body tr').forEach((row) => {
+      const selected = state.selectedGames.some((game) => game.id === Number(row.dataset.gameId));
+      row.classList.toggle('selected', selected);
+      row.querySelector('input').checked = selected;
+    });
+    $('#empty-calendar').hidden = !state.selectedGames.length;
+    $('#calendar-content').hidden = !state.selectedGames.length;
+    if (state.selectedGames.length) {
+      $('#selected-game').textContent = state.selectedGames.map((game) => game.Jeu).join(' + ');
+      renderCalendar();
+    }
+  } else {
+    document.querySelectorAll('#series-body tr').forEach((row) => {
+      const selected = state.selectedBooks.some((book) => book.id === Number(row.dataset.bookId));
+      row.classList.toggle('selected', selected);
+      row.querySelector('input[type="checkbox"]').checked = selected;
+      const book = state.selectedBooks.find((item) => item.id === Number(row.dataset.bookId));
+      const quantity = row.querySelector('.book-quantity-input');
+      if (book && quantity) quantity.value = book.requested_quantity;
+    });
+    $('#series-empty-calendar').hidden = !state.selectedBooks.length;
+    $('#series-calendar-content').hidden = !state.selectedBooks.length;
+    if (state.selectedBooks.length) {
+      $('#series-selected').textContent = state.selectedBooks.map((book) => book.Titre).join(' + ');
+      renderSeriesCalendar();
+    }
+  }
+  const date = booking.loan_date > iso(new Date()) ? booking.loan_date : iso(new Date());
+  openManageModal(date, booking.id);
+}
+async function showManagerBookings() {
+  const modal = ensureManagerBookingsModal();
+  const list = modal.querySelector('#manager-bookings-list');
+  list.innerHTML = '<p class="modal-note">Chargement des réservations…</p>';
+  modal.hidden = false;
+  try {
+    await loadManagerBookings();
+    const bookings = [...allBookings('games'), ...allBookings('books')]
+      .sort((first, second) => second.loan_date.localeCompare(first.loan_date));
+    if (!bookings.length) {
+      list.innerHTML = '<p class="modal-note">Aucune réservation de jeu ou de livre / album.</p>';
+      return;
+    }
+    list.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Collection</th><th>Ressources</th><th>Emprunteur</th><th>Période</th><th></th></tr></thead><tbody>${bookings.map((booking, index) => {
+      const resources = bookingResources(booking).map(escapeHtml).join(', ');
+      return `<tr><td>${booking.collection === 'books' ? 'Livres / albums' : 'Jeux'}</td><td>${resources}</td><td>${escapeHtml(booking.first_name)} ${escapeHtml(booking.name)}</td><td>Du ${formatDate(booking.loan_date)} au ${formatDate(booking.return_date)}</td><td><button class="secondary-button" data-manager-booking="${index}" type="button">Gérer</button></td></tr>`;
+    }).join('')}</tbody></table></div>`;
+    list.querySelectorAll('[data-manager-booking]').forEach((button) => button.addEventListener('click', () => {
+      const booking = bookings[Number(button.dataset.managerBooking)];
+      if (booking) {
+        modal.hidden = true;
+        openManagerBooking(booking);
+      }
+    }));
+  } catch (error) {
+    list.innerHTML = `<p class="form-error">${escapeHtml(error.message)}</p>`;
+  }
+}
 async function loadDigital() {
   const [inventoryResponse, loansResponse] = await Promise.all([
     fetch('/api/digital-equipment', { cache: 'no-store' }),
@@ -394,7 +496,7 @@ function seriesAvailability() {
   }
   return days;
 }
-function allBookings() { const source = state.collection === 'books' ? state.bookLoans : state.collection === 'digital' ? state.digitalLoans : state.loans; const grouped = new Map(); source.forEach((loan) => { const key = [loan.name, loan.first_name, loan.professional_email, loan.school, loan.loan_date, loan.return_date, state.collection].join('\u001f'); if (!grouped.has(key)) grouped.set(key, { ...loan, collection: state.collection, ids: [], entries: [] }); const booking = grouped.get(key); booking.confirmation_sent ||= loan.confirmation_sent; booking.ids.push(loan.id); booking.entries.push(loan); }); return [...grouped.values()]; }
+function allBookings(collection = state.collection) { const source = collection === 'books' ? state.bookLoans : collection === 'digital' ? state.digitalLoans : state.loans; const grouped = new Map(); source.forEach((loan) => { const key = [loan.name, loan.first_name, loan.professional_email, loan.school, loan.loan_date, loan.return_date, collection].join('\u001f'); if (!grouped.has(key)) grouped.set(key, { ...loan, collection, ids: [], entries: [] }); const booking = grouped.get(key); booking.confirmation_sent ||= loan.confirmation_sent; booking.ids.push(loan.id); booking.entries.push(loan); }); return [...grouped.values()]; }
 function loansForDate(date) { return allBookings().filter((booking) => booking.entries.some((loan) => { const selected = state.collection === 'books' ? state.selectedBooks.some((book) => sameBook(loan, book)) : state.collection === 'digital' ? state.selectedEquipment.some((equipment) => equipment.id === loan.equipment_id) : state.selectedGames.some((game) => game.id === loan.game_id); return selected && loan.loan_date <= date && date <= (loan.occupied_until || loan.return_date); })); }
 function renderCalendar() { const year = state.month.getFullYear(); const month = state.month.getMonth(); $('#calendar-month').textContent = new Intl.DateTimeFormat('fr-FR', { month: 'long', year: 'numeric' }).format(state.month); const firstDay = (new Date(year, month, 1).getDay() + 6) % 7; const daysInMonth = new Date(year, month + 1, 0).getDate(); const today = iso(new Date()); const busy = occupiedDates(); let html = ''; for (let index = 0; index < firstDay; index += 1) html += '<button class="day empty" tabindex="-1" aria-hidden="true"></button>'; for (let day = 1; day <= daysInMonth; day += 1) { const date = iso(new Date(year, month, day)); const occupied = busy.has(date); const unavailable = occupied || date < today; const classes = ['day', occupied ? 'occupied' : '', date < today ? 'past' : '', date === today ? 'today' : ''].filter(Boolean).join(' '); const disabled = unavailable && !state.manager; html += `<button class="${classes}" data-date="${date}" ${disabled ? 'disabled' : ''}>${day}</button>`; } $('#calendar-grid').innerHTML = html; document.querySelectorAll('#calendar-grid .day:not(.empty)').forEach((button) => button.addEventListener('click', () => { if (button.classList.contains('occupied')) openManageModal(button.dataset.date); else openModal(button.dataset.date); })); }
 function renderSeriesCalendar() {
@@ -514,6 +616,9 @@ function openModal(date) {
   form.dataset.collection = state.collection;
   form.reset();
   $('#loan-modal-eyebrow').textContent = state.collection === 'digital' ? 'Pré-réservation soumise à validation' : 'Nouvelle réservation';
+  form.querySelector('button[type="submit"]').firstChild.textContent = state.collection === 'digital'
+    ? 'Enregistrer la pré-réservation '
+    : 'Enregistrer la réservation ';
   startInput.value = date;
   endInput.value = iso(new Date(new Date(`${date}T12:00:00`).getTime() + 20 * 86400000));
   const updateDates = () => {
@@ -779,11 +884,22 @@ function syncManagerButtons() {
     document.querySelector('.header-tools').insertBefore(loansButton, $('#logout-manager'));
   }
   loansButton.hidden = !state.manager;
+  let bookingsButton = $('#manager-bookings-button');
+  if (!bookingsButton) {
+    bookingsButton = document.createElement('button');
+    bookingsButton.id = 'manager-bookings-button';
+    bookingsButton.className = 'manager-button';
+    bookingsButton.type = 'button';
+    bookingsButton.textContent = 'Réservations jeux et livres';
+    bookingsButton.addEventListener('click', showManagerBookings);
+    document.querySelector('.header-tools').insertBefore(bookingsButton, $('#logout-manager'));
+  }
+  bookingsButton.hidden = !state.manager;
   updatePendingReservationsButton();
 }
 window.addEventListener('hashchange', syncManagerButtons);
 syncManagerButtons();
-async function loginManager(event) { event.preventDefault(); const form = event.currentTarget; const response = await fetch('/api/manager/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: form.password.value }) }); const result = await response.json(); if (!response.ok) { $('#manager-error').textContent = result.detail || 'Connexion impossible.'; return; } state.manager = true; syncManagerButtons(); form.reset(); $('#manager-modal').hidden = true; if (state.selectedGames.length) renderCalendar(); if (state.selectedBooks.length) renderSeriesCalendar(); if (state.selectedEquipment.length) renderDigitalCalendar(); try { await loadDigital(); const pending = pendingDigitalBookings(); if (pending.length) showPendingReservations(); else showToast('Mode gestionnaire activé. Aucune réservation numérique en attente.'); } catch (error) { showToast(`Mode gestionnaire activé, mais les réservations numériques n’ont pas pu être vérifiées : ${error.message}`); } }
+async function loginManager(event) { event.preventDefault(); const form = event.currentTarget; const response = await fetch('/api/manager/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: form.password.value }) }); const result = await response.json(); if (!response.ok) { $('#manager-error').textContent = result.detail || 'Connexion impossible.'; return; } state.manager = true; syncManagerButtons(); form.reset(); $('#manager-modal').hidden = true; if (state.selectedGames.length) renderCalendar(); if (state.selectedBooks.length) renderSeriesCalendar(); if (state.selectedEquipment.length) renderDigitalCalendar(); try { await loadDigital(); const pending = pendingDigitalBookings(); if (pending.length) showPendingReservations(); else await showManagerBookings(); } catch (error) { showToast(`Mode gestionnaire activé, mais les réservations n’ont pas pu être chargées : ${error.message}`); } }
 function openManagerModal() { $('#manager-error').textContent = ''; $('#manager-modal').hidden = false; $('#manager-password').focus(); }
 function closeManagerModal() { $('#manager-modal').hidden = true; }
 async function logoutManager() {
