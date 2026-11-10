@@ -91,10 +91,12 @@ async function loadBooks() {
   state.bookLoans = await loansResponse.json();
   loadSchools();
   $('#series-count').textContent = `${state.books.length} série${state.books.length > 1 ? 's' : ''}`;
-  $('#series-body').innerHTML = state.books.map((book) => `<tr data-book-id="${book.id}" data-author="${escapeHtml(book.Auteur)}"><td class="selection-cell"><input type="checkbox" aria-label="Sélectionner ${escapeHtml(book.Titre)}"></td><td><strong>${escapeHtml(book.Titre)}</strong></td><td>${escapeHtml(book.Auteur) || '—'}</td><td>${escapeHtml(book.Lieu) || '—'}</td><td><div class="book-quantity"><span>${escapeHtml(book.available_quantity)} disponible(s) / ${escapeHtml(book.quantity)} au total</span><input class="book-quantity-input" type="number" min="1" max="${Math.max(1, Number(book.available_quantity) || 1)}" value="1" ${Number(book.available_quantity) > 0 ? '' : 'disabled'} aria-label="Quantité demandée pour ${escapeHtml(book.Titre)}"></div></td></tr>`).join('');
+  $('#series-body').innerHTML = state.books.map((book) => `<tr data-book-id="${book.id}" data-title="${escapeHtml(book.Titre)}" data-author="${escapeHtml(book.Auteur)}"><td class="selection-cell"><input type="checkbox" aria-label="Sélectionner ${escapeHtml(book.Titre)}"></td><td><strong>${escapeHtml(book.Titre)}</strong></td><td>${escapeHtml(book.Auteur) || '—'}</td><td>${escapeHtml(book.Lieu) || '—'}</td><td><div class="book-quantity"><span>${escapeHtml(book.available_quantity)} disponible(s) / ${escapeHtml(book.quantity)} au total</span><input class="book-quantity-input" type="number" min="1" max="${Math.max(1, Number(book.available_quantity) || 1)}" value="1" ${Number(book.available_quantity) > 0 ? '' : 'disabled'} aria-label="Quantité demandée pour ${escapeHtml(book.Titre)}"></div></td></tr>`).join('');
+  const titleSearch = $('#series-title-search');
   const authorSearch = $('#series-author-search');
-  authorSearch.addEventListener('input', filterBooksByAuthor);
-  filterBooksByAuthor();
+  titleSearch.addEventListener('input', filterBooks);
+  authorSearch.addEventListener('input', filterBooks);
+  filterBooks();
   document.querySelectorAll('#series-body tr').forEach((row) => {
     row.addEventListener('click', (event) => { if (!event.target.closest('input')) toggleBook(Number(row.dataset.bookId)); });
     const checkbox = row.querySelector('input[type="checkbox"]');
@@ -109,15 +111,17 @@ async function loadBooks() {
     });
   });
 }
-function filterBooksByAuthor() {
-  const query = normalizeSearchText($('#series-author-search').value);
+function filterBooks() {
+  const titleQuery = normalizeSearchText($('#series-title-search').value);
+  const authorQuery = normalizeSearchText($('#series-author-search').value);
   let visibleCount = 0;
   document.querySelectorAll('#series-body tr').forEach((row) => {
-    const matches = !query || normalizeSearchText(row.dataset.author).includes(query);
+    const matches = normalizeSearchText(row.dataset.title).includes(titleQuery)
+      && normalizeSearchText(row.dataset.author).includes(authorQuery);
     row.hidden = !matches;
     if (matches) visibleCount += 1;
   });
-  $('#series-count').textContent = query
+  $('#series-count').textContent = titleQuery || authorQuery
     ? `${visibleCount} / ${state.books.length} séries`
     : `${state.books.length} série${state.books.length > 1 ? 's' : ''}`;
   $('#series-no-results').hidden = visibleCount > 0;
