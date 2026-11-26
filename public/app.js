@@ -1137,48 +1137,20 @@ function updatePendingEpsButton() {
 function syncManagerButtons() {
   $('#manager-button').hidden = state.manager;
   $('#logout-manager').hidden = !state.manager;
-  let pendingButton = $('#pending-reservations-button');
-  if (!pendingButton) {
-    pendingButton = document.createElement('button');
-    pendingButton.id = 'pending-reservations-button';
-    pendingButton.className = 'manager-button pending-reservations-button';
-    pendingButton.type = 'button';
-    pendingButton.addEventListener('click', showPendingReservations);
-    document.querySelector('.header-tools').insertBefore(pendingButton, $('#logout-manager'));
+  let dashboard = $('#manager-dashboard');
+  if (!dashboard) {
+    dashboard = document.createElement('section');
+    dashboard.id = 'manager-dashboard';
+    dashboard.className = 'manager-dashboard';
+    dashboard.setAttribute('aria-label', 'Actions de gestionnaire');
+    dashboard.innerHTML = '<p class="eyebrow">Espace gestionnaire</p><div class="manager-dashboard-grid"><button id="digital-loans-button" class="manager-button" type="button">Emprunts numériques</button><button id="pending-reservations-button" class="manager-button pending-reservations-button" type="button"></button><button id="eps-loans-button" class="manager-button" type="button">Emprunts EPS</button><button id="eps-pending-button" class="manager-button pending-reservations-button" type="button"></button></div>';
+    $('#home-view').querySelector('.hero').after(dashboard);
+    $('#digital-loans-button').addEventListener('click', showDigitalLoans);
+    $('#pending-reservations-button').addEventListener('click', showPendingReservations);
+    $('#eps-loans-button').addEventListener('click', showEpsLoans);
+    $('#eps-pending-button').addEventListener('click', showPendingEpsReservations);
   }
-  pendingButton.hidden = !state.manager;
-  let loansButton = $('#digital-loans-button');
-  if (!loansButton) {
-    loansButton = document.createElement('button');
-    loansButton.id = 'digital-loans-button';
-    loansButton.className = 'manager-button';
-    loansButton.type = 'button';
-    loansButton.textContent = 'Emprunts numériques';
-    loansButton.addEventListener('click', showDigitalLoans);
-    document.querySelector('.header-tools').insertBefore(loansButton, $('#logout-manager'));
-  }
-  loansButton.hidden = !state.manager;
-  let epsPendingButton = $('#eps-pending-button');
-  if (!epsPendingButton) {
-    epsPendingButton = document.createElement('button');
-    epsPendingButton.id = 'eps-pending-button';
-    epsPendingButton.className = 'manager-button pending-reservations-button';
-    epsPendingButton.type = 'button';
-    epsPendingButton.addEventListener('click', showPendingEpsReservations);
-    document.querySelector('.header-tools').insertBefore(epsPendingButton, $('#logout-manager'));
-  }
-  epsPendingButton.hidden = !state.manager;
-  let epsLoansButton = $('#eps-loans-button');
-  if (!epsLoansButton) {
-    epsLoansButton = document.createElement('button');
-    epsLoansButton.id = 'eps-loans-button';
-    epsLoansButton.className = 'manager-button';
-    epsLoansButton.type = 'button';
-    epsLoansButton.textContent = 'Emprunts EPS';
-    epsLoansButton.addEventListener('click', showEpsLoans);
-    document.querySelector('.header-tools').insertBefore(epsLoansButton, $('#logout-manager'));
-  }
-  epsLoansButton.hidden = !state.manager;
+  dashboard.hidden = !state.manager;
   let bookingsButton = $('#manager-bookings-button');
   if (!bookingsButton) {
     bookingsButton = document.createElement('button');
@@ -1195,7 +1167,7 @@ function syncManagerButtons() {
 }
 window.addEventListener('hashchange', syncManagerButtons);
 syncManagerButtons();
-async function loginManager(event) { event.preventDefault(); const form = event.currentTarget; const response = await fetch('/api/manager/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: form.password.value }) }); const result = await response.json(); if (!response.ok) { $('#manager-error').textContent = result.detail || 'Connexion impossible.'; return; } state.manager = true; syncManagerButtons(); form.reset(); $('#manager-modal').hidden = true; if (state.selectedGames.length) renderCalendar(); if (state.selectedBooks.length) renderSeriesCalendar(); if (state.selectedEquipment.length) renderDigitalCalendar(); try { await Promise.all([loadDigital(), loadEPS()]); const pending = pendingDigitalBookings(); const pendingEps = pendingEpsBookings(); if (pending.length) showPendingReservations(); else if (pendingEps.length) showPendingEpsReservations(); else await showManagerBookings(); } catch (error) { showToast(`Mode gestionnaire activé, mais les réservations n’ont pas pu être chargées : ${error.message}`); } }
+async function loginManager(event) { event.preventDefault(); const form = event.currentTarget; const response = await fetch('/api/manager/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: form.password.value }) }); const result = await response.json(); if (!response.ok) { $('#manager-error').textContent = result.detail || 'Connexion impossible.'; return; } state.manager = true; syncManagerButtons(); form.reset(); $('#manager-modal').hidden = true; if (location.hash !== '#home') location.hash = '#home'; route(); if (state.selectedGames.length) renderCalendar(); if (state.selectedBooks.length) renderSeriesCalendar(); if (state.selectedEquipment.length) renderDigitalCalendar(); try { await Promise.all([loadDigital(), loadEPS()]); updatePendingReservationsButton(); updatePendingEpsButton(); } catch (error) { showToast(`Mode gestionnaire activé, mais les réservations n’ont pas pu être chargées : ${error.message}`); } }
 function openManagerModal() { $('#manager-error').textContent = ''; $('#manager-modal').hidden = false; $('#manager-password').focus(); }
 function closeManagerModal() { $('#manager-modal').hidden = true; }
 async function logoutManager() {
