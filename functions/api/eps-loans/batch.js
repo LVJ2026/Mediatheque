@@ -65,11 +65,11 @@ async function sendRequestEmails(env, input, equipment, created) {
     }
   }
 
-  const managers = [...new Set([env.MANAGER_EMAIL1, env.MANAGER_EMAIL2]
+  const managers = [...new Set([env.MANAGER_EMAIL1, env.MANAGER_EMAIL2, env.MANAGER_EMAIL3]
     .map((email) => typeof email === 'string' ? email.trim() : '').filter(Boolean))];
   const managerErrors = [];
   let managerSent = 0;
-  if (!managers.length) managerErrors.push('Aucune adresse MANAGER_EMAIL1 ou MANAGER_EMAIL2 n’est configurée dans Cloudflare.');
+  if (!managers.length) managerErrors.push('Aucune adresse MANAGER_EMAIL1, MANAGER_EMAIL2 ou MANAGER_EMAIL3 n’est configurée dans Cloudflare.');
   for (const to of managers) {
     try {
       await sendMail(env, {
