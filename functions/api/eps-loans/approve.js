@@ -1,0 +1,86 @@
+import { assertConfigured, gristRequest } from '../../_grist.js';
+import { epsInventoryTable, epsLoansTable, normalizeEpsLoan } from '../../_eps.js';
+import { sendMail } from '../../_mail.js';
+import { isManager, unauthorized } from '../../_manager.js';
+
+function validIds(ids) {
+  return Array.isArray(ids) && ids.length > 0
+    && ids.every((id) => Number.isInteger(Number(id)) && Number(id) > 0)
+    && new Set(ids.map(Number)).size === ids.length;
+}
+
+function dateInParis(date) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+function formatDate(value) {
+  return new Intl.DateTimeFormat('fr-FR', { dateStyle: 'long', timeZone: 'UTC' }).format(new Date(`${value}T12:00:00Z`));
+}
+
+export async function onRequestPost({ request, env }) {
+  if (!await isManager(request, env)) return unauthorized();
+  try {
+    assertConfigured(env);
+    const input = await request.json();
+    if (!validIds(input.loan_ids)) return Response.json({ detail: 'Identifiants de réservation invalides.' }, { status: 422 });
+    const ids = new Set(input.loan_ids.map(Number));
+    const payload = await gristRequest(env, epsLoansTable(env));
+    const records = (payload.records || []).filter((record) => ids.has(Number(record.id)));
+    if (records.length !== ids.size) return Response.json({ detail: 'Une pré-réservation est introuvable.' }, { status: 404 });
+    if (records.some((record) => record.fields?.Retour || record.fields?.Date_Annulation)) {
+      return Response.json({ detail: 'Cette pré-réservation est déjà clôturée.' }, { status: 409 });
+    }
+    const approved = records.filter((record) => record.fields?.Validee === true || record.fields?.Validee === 1);
+    if (approved.length && approved.length !== records.length) {
+      return Response.json({ detail: 'Les lignes de cette fiche ont des états de validation différents.' }, { status: 409 });
+    }
+    if (approved.length === records.length && records.some((record) => record.fields?.Confirmation_Envoyee)) {
+      return Response.json({ detail: 'Le courriel de confirmation a déjà été envoyé.' }, { status: 409 });
+    }
+    if (!approved.length) {
+      await gristRequest(env, epsLoansTable(env), {
+        method: 'PATCH',
+        body: JSON.stringify({ records: records.map((record) => ({ id: record.id, fields: { Validee: true } })) }),
+      });
+    }
+
+    const inventory = await gristRequest(env, epsInventoryTable(env));
+    const loans = records.map((record) => normalizeEpsLoan({
+      ...record, fields: { ...(record.fields || {}), Validee: true },
+    }, inventory.records || []));
+    const loan = loans[0];
+    const equipment = loans.map((item) => `- ${item.equipment_name} × ${item.quantity}`).join('\n');
+    try {
+      await sendMail(env, {
+        to: loan.professional_email,
+        subject: 'Confirmation de votre réservation de matériel EPS',
+        text: `Bonjour ${loan.first_name} ${loan.name},\n\nVotre réservation est confirmée pour :\n${equipment}\n\nDu ${formatDate(loan.loan_date)} au ${formatDate(loan.return_date)}.\n\nPrendre contact avec la circonscription pour les modalités de récupération de l’emprunt.`,
+      });
+      let trackingStatus = 'saved';
+      let trackingError = '';
+      try {
+        await gristRequest(env, epsLoansTable(env), {
+          method: 'PATCH',
+          body: JSON.stringify({
+            records: records.map((record) => ({ id: record.id, fields: { Confirmation_Envoyee: dateInParis(new Date()) } })),
+          }),
+        });
+      } catch (error) {
+        trackingStatus = 'failed';
+        trackingError = String(error.message || 'Erreur de suivi inconnue').slice(0, 200);
+        console.error('Courriel EPS envoyé, mais le marqueur de confirmation n’a pas été enregistré :', error.message);
+      }
+      return Response.json({ approved: records.length, email_status: 'sent', tracking_status: trackingStatus, tracking_error: trackingError });
+    } catch (error) {
+      const emailError = String(error.message || 'Erreur SMTP inconnue').slice(0, 200);
+      console.error('Échec du courriel de validation du matériel EPS :', emailError);
+      return Response.json({ approved: records.length, email_status: 'failed', email_error: emailError });
+    }
+  } catch (error) {
+    return Response.json({ detail: error.message }, { status: 503 });
+  }
+}

@@ -1,4 +1,4 @@
-const state = { games: [], loans: [], selectedGames: [], books: [], bookLoans: [], selectedBooks: [], equipment: [], digitalLoans: [], selectedEquipment: [], collection: 'games', month: new Date(), manager: false };
+const state = { games: [], loans: [], selectedGames: [], books: [], bookLoans: [], selectedBooks: [], equipment: [], digitalLoans: [], selectedEquipment: [], epsEquipment: [], epsLoans: [], selectedEps: [], collection: 'games', month: new Date(), manager: false };
 let loansRefreshInFlight = false;
 const $ = (selector) => document.querySelector(selector);
 const iso = (date) => { const local = new Date(date); local.setMinutes(local.getMinutes() - local.getTimezoneOffset()); return local.toISOString().slice(0, 10); };
@@ -198,6 +198,46 @@ async function refreshDigitalData() {
     if (item) row.querySelector('.digital-remaining').textContent = item.available_quantity;
   });
 }
+async function loadEPS() {
+  const [inventoryResponse, loansResponse] = await Promise.all([
+    fetch('/api/eps-equipment', { cache: 'no-store' }),
+    fetch('/api/eps-loans', { cache: 'no-store' }),
+  ]);
+  if (!inventoryResponse.ok || !loansResponse.ok) {
+    const failedResponse = !loansResponse.ok ? loansResponse : inventoryResponse;
+    const detail = await failedResponse.json().catch(() => ({}));
+    throw new Error(detail.detail || 'Impossible de charger l’inventaire et les pré-réservations EPS.');
+  }
+  state.epsEquipment = await inventoryResponse.json();
+  state.epsLoans = await loansResponse.json();
+  updatePendingEpsButton();
+  loadSchools();
+  $('#eps-count').textContent = `${state.epsEquipment.length} équipement${state.epsEquipment.length > 1 ? 's' : ''}`;
+  $('#eps-body').innerHTML = state.epsEquipment.map((item) => `<tr data-eps-id="${item.id}"><td class="selection-cell"><input type="radio" name="eps-equipment" aria-label="Sélectionner ${escapeHtml(item.Equipement)}" ${item.quantity < 1 ? 'disabled' : ''}></td><td><strong>${escapeHtml(item.Equipement)}</strong></td><td>${escapeHtml(item.quantity)}</td><td class="eps-remaining">${escapeHtml(item.available_quantity)}</td></tr>`).join('');
+  document.querySelectorAll('#eps-body tr').forEach((row) => {
+    row.addEventListener('click', (event) => { if (!event.target.closest('input')) toggleEps(Number(row.dataset.epsId)); });
+    const radio = row.querySelector('input[type="radio"]');
+    radio.addEventListener('click', (event) => event.stopPropagation());
+    radio.addEventListener('change', () => toggleEps(Number(row.dataset.epsId)));
+  });
+}
+async function refreshEPSData() {
+  const [inventoryResponse, loansResponse] = await Promise.all([
+    fetch('/api/eps-equipment', { cache: 'no-store' }),
+    fetch('/api/eps-loans', { cache: 'no-store' }),
+  ]);
+  if (!inventoryResponse.ok || !loansResponse.ok) throw new Error('Impossible d’actualiser le stock EPS.');
+  state.epsEquipment = await inventoryResponse.json();
+  state.epsLoans = await loansResponse.json();
+  updatePendingEpsButton();
+  document.querySelectorAll('#eps-body tr').forEach((row) => {
+    const item = state.epsEquipment.find((equipment) => equipment.id === Number(row.dataset.epsId));
+    if (item) {
+      row.querySelector('.eps-remaining').textContent = item.available_quantity;
+      row.querySelector('input').disabled = item.quantity < 1;
+    }
+  });
+}
 async function loadBooks() {
   const [booksResponse, loansResponse] = await Promise.all([
     fetch('/api/books', { cache: 'no-store' }),
@@ -273,12 +313,16 @@ async function refreshBookData() {
   });
 }
 async function refreshLoans() {
-  if ((!state.games.length && !state.books.length && !state.equipment.length) || loansRefreshInFlight) return;
+  if ((!state.games.length && !state.books.length && !state.equipment.length && !state.epsEquipment.length) || loansRefreshInFlight) return;
   loansRefreshInFlight = true;
   try {
     if (state.equipment.length) {
       await refreshDigitalData();
       if (state.selectedEquipment.length) renderDigitalCalendar();
+    }
+    if (state.epsEquipment.length) {
+      await refreshEPSData();
+      if (state.selectedEps.length) renderEPSCalendar();
     }
     const response = await fetch('/api/loans', { cache: 'no-store' });
     if (response.ok) state.loans = await response.json();
@@ -384,6 +428,32 @@ function toggleEquipment(id) {
     renderDigitalCalendar();
   }
 }
+function toggleEps(id) {
+  const equipment = state.epsEquipment.find((item) => item.id === id);
+  if (!equipment || equipment.quantity < 1) return;
+  state.selectedEps = state.selectedEps.some((item) => item.id === id)
+    ? []
+    : [{ ...equipment, requested_quantity: 1 }];
+  const today = iso(new Date());
+  const nextReservation = state.epsLoans
+    .filter((loan) => loan.is_active && loan.equipment_id === id && loan.return_date >= today)
+    .sort((first, second) => first.loan_date.localeCompare(second.loan_date))
+    .find((loan) => loan.loan_date <= today && today <= loan.occupied_until)
+    || state.epsLoans.filter((loan) => loan.is_active && loan.equipment_id === id && loan.loan_date >= today)
+      .sort((first, second) => first.loan_date.localeCompare(second.loan_date))[0];
+  state.month = nextReservation ? new Date(`${nextReservation.loan_date}T12:00:00`) : new Date();
+  document.querySelectorAll('#eps-body tr').forEach((row) => {
+    const selected = state.selectedEps.some((item) => item.id === Number(row.dataset.epsId));
+    row.classList.toggle('selected', selected);
+    row.querySelector('input[type="radio"]').checked = selected;
+  });
+  $('#eps-empty-calendar').hidden = state.selectedEps.length > 0;
+  $('#eps-calendar-content').hidden = state.selectedEps.length === 0;
+  if (state.selectedEps.length) {
+    $('#eps-selected').textContent = state.selectedEps[0].Equipement;
+    renderEPSCalendar();
+  }
+}
 function clearGameSelection() {
   state.selectedGames = [];
   document.querySelectorAll('#games-body tr').forEach((row) => {
@@ -410,6 +480,15 @@ function clearEquipmentSelection() {
   });
   $('#digital-empty-calendar').hidden = false;
   $('#digital-calendar-content').hidden = true;
+}
+function clearEpsSelection() {
+  state.selectedEps = [];
+  document.querySelectorAll('#eps-body tr').forEach((row) => {
+    row.classList.remove('selected');
+    row.querySelector('input[type="radio"]').checked = false;
+  });
+  $('#eps-empty-calendar').hidden = false;
+  $('#eps-calendar-content').hidden = true;
 }
 function occupiedDates() { const selectedIds = new Set(state.selectedGames.map((game) => game.id)); const days = new Set(); state.loans.filter((loan) => selectedIds.has(loan.game_id)).forEach((loan) => { const day = new Date(`${loan.loan_date}T12:00:00`); const end = new Date(`${loan.occupied_until || loan.return_date}T12:00:00`); while (day <= end) { days.add(iso(day)); day.setDate(day.getDate() + 1); } }); return days; }
 function sameBook(loan, book) {
@@ -497,6 +576,52 @@ function renderDigitalCalendar() {
     else if (button.dataset.date >= today) openModal(button.dataset.date);
   }));
 }
+function epsAvailabilityForDate(equipment, date) {
+  const bookings = state.epsLoans.filter((loan) => loan.equipment_id === equipment.id
+    && loan.loan_date <= date && date <= (loan.occupied_until || loan.return_date));
+  const total = Math.max(0, Number(equipment.quantity) || 0);
+  const approvedQuantity = bookings.filter((loan) => loan.is_approved)
+    .reduce((sum, loan) => sum + loan.quantity, 0);
+  const pendingQuantity = bookings.filter((loan) => !loan.is_approved)
+    .reduce((sum, loan) => sum + loan.quantity, 0);
+  return { total, approvedQuantity, pendingQuantity, available: Math.max(0, total - approvedQuantity - pendingQuantity) };
+}
+function availableEpsQuantityForPeriod(equipment, startDate, endDate) {
+  const bookings = state.epsLoans.filter((loan) => loan.equipment_id === equipment.id
+    && loan.loan_date <= endDate && (loan.occupied_until || loan.return_date) >= startDate);
+  const changeDates = new Set([startDate]);
+  for (const loan of bookings) {
+    if (loan.loan_date > startDate && loan.loan_date <= endDate) changeDates.add(loan.loan_date);
+    const nextAvailable = iso(new Date(new Date(`${loan.occupied_until || loan.return_date}T12:00:00`).getTime() + 86400000));
+    if (nextAvailable > startDate && nextAvailable <= endDate) changeDates.add(nextAvailable);
+  }
+  return Math.min(...[...changeDates].map((date) => epsAvailabilityForDate(equipment, date).available));
+}
+function renderEPSCalendar() {
+  const year = state.month.getFullYear();
+  const month = state.month.getMonth();
+  $('#eps-calendar-month').textContent = new Intl.DateTimeFormat('fr-FR', { month: 'long', year: 'numeric' }).format(state.month);
+  const firstDay = (new Date(year, month, 1).getDay() + 6) % 7;
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const today = iso(new Date());
+  let html = '';
+  for (let index = 0; index < firstDay; index += 1) html += '<button class="day empty" tabindex="-1" aria-hidden="true"></button>';
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    const date = iso(new Date(year, month, day));
+    const availability = state.selectedEps.map((equipment) => epsAvailabilityForDate(equipment, date));
+    const approvedQuantity = availability.reduce((sum, item) => sum + item.approvedQuantity, 0);
+    const pendingQuantity = availability.reduce((sum, item) => sum + item.pendingQuantity, 0);
+    const remaining = availability.reduce((sum, item) => sum + item.available, 0);
+    const status = pendingQuantity > 0 ? 'pending' : remaining === 0 ? 'approved' : approvedQuantity > 0 ? 'partial-approved' : 'available';
+    const classes = ['day', `digital-${status}`, date < today ? 'past' : '', date === today ? 'today' : ''].filter(Boolean).join(' ');
+    html += `<button class="${classes}" data-date="${date}" ${date < today ? 'disabled' : ''}>${day}</button>`;
+  }
+  $('#eps-calendar-grid').innerHTML = html;
+  document.querySelectorAll('#eps-calendar-grid .day:not(.empty)').forEach((button) => button.addEventListener('click', () => {
+    if (state.manager && loansForDate(button.dataset.date).length) openManageModal(button.dataset.date);
+    else if (button.dataset.date >= today) openModal(button.dataset.date);
+  }));
+}
 function seriesAvailability() {
   const days = new Map();
   const year = state.month.getFullYear();
@@ -515,8 +640,8 @@ function seriesAvailability() {
   }
   return days;
 }
-function allBookings(collection = state.collection) { const source = collection === 'books' ? state.bookLoans : collection === 'digital' ? state.digitalLoans : state.loans; const grouped = new Map(); source.forEach((loan) => { const key = [loan.name, loan.first_name, loan.professional_email, loan.school, loan.loan_date, loan.return_date, collection].join('\u001f'); if (!grouped.has(key)) grouped.set(key, { ...loan, collection, ids: [], entries: [] }); const booking = grouped.get(key); booking.confirmation_sent ||= loan.confirmation_sent; booking.ids.push(loan.id); booking.entries.push(loan); }); return [...grouped.values()]; }
-function loansForDate(date) { return allBookings().filter((booking) => booking.entries.some((loan) => { const selected = state.collection === 'books' ? state.selectedBooks.some((book) => sameBook(loan, book)) : state.collection === 'digital' ? state.selectedEquipment.some((equipment) => equipment.id === loan.equipment_id) : state.selectedGames.some((game) => game.id === loan.game_id); return selected && loan.loan_date <= date && date <= (loan.occupied_until || loan.return_date); })); }
+function allBookings(collection = state.collection) { const source = collection === 'books' ? state.bookLoans : collection === 'digital' ? state.digitalLoans : collection === 'eps' ? state.epsLoans : state.loans; const grouped = new Map(); source.forEach((loan) => { const key = [loan.name, loan.first_name, loan.professional_email, loan.school, loan.loan_date, loan.return_date, collection].join('\u001f'); if (!grouped.has(key)) grouped.set(key, { ...loan, collection, ids: [], entries: [] }); const booking = grouped.get(key); booking.confirmation_sent ||= loan.confirmation_sent; booking.ids.push(loan.id); booking.entries.push(loan); }); return [...grouped.values()]; }
+function loansForDate(date) { return allBookings().filter((booking) => booking.entries.some((loan) => { const selected = state.collection === 'books' ? state.selectedBooks.some((book) => sameBook(loan, book)) : state.collection === 'digital' ? state.selectedEquipment.some((equipment) => equipment.id === loan.equipment_id) : state.collection === 'eps' ? state.selectedEps.some((equipment) => equipment.id === loan.equipment_id) : state.selectedGames.some((game) => game.id === loan.game_id); return selected && loan.loan_date <= date && date <= (loan.occupied_until || loan.return_date); })); }
 function renderCalendar() { const year = state.month.getFullYear(); const month = state.month.getMonth(); $('#calendar-month').textContent = new Intl.DateTimeFormat('fr-FR', { month: 'long', year: 'numeric' }).format(state.month); const firstDay = (new Date(year, month, 1).getDay() + 6) % 7; const daysInMonth = new Date(year, month + 1, 0).getDate(); const today = iso(new Date()); const busy = occupiedDates(); let html = ''; for (let index = 0; index < firstDay; index += 1) html += '<button class="day empty" tabindex="-1" aria-hidden="true"></button>'; for (let day = 1; day <= daysInMonth; day += 1) { const date = iso(new Date(year, month, day)); const occupied = busy.has(date); const unavailable = occupied || date < today; const classes = ['day', occupied ? 'occupied' : '', date < today ? 'past' : '', date === today ? 'today' : ''].filter(Boolean).join(' '); const disabled = unavailable && !state.manager; html += `<button class="${classes}" data-date="${date}" ${disabled ? 'disabled' : ''}>${day}</button>`; } $('#calendar-grid').innerHTML = html; document.querySelectorAll('#calendar-grid .day:not(.empty)').forEach((button) => button.addEventListener('click', () => { if (button.classList.contains('occupied')) openManageModal(button.dataset.date); else openModal(button.dataset.date); })); }
 function renderSeriesCalendar() {
   const year = state.month.getFullYear();
@@ -620,6 +745,35 @@ function renderDigitalQuantityFields(startDate, endDate) {
     $('#loan-form').dataset.digitalSelection = selectionPayload();
   }));
 }
+function renderEpsQuantityFields(startDate, endDate) {
+  const container = $('#eps-quantity-fields');
+  const isEPS = state.collection === 'eps';
+  container.hidden = !isEPS;
+  if (!isEPS) return;
+  const submitButton = $('#loan-form').querySelector('button[type="submit"]');
+  const equipment = state.selectedEps[0];
+  const available = equipment ? availableEpsQuantityForPeriod(equipment, startDate, endDate) : 0;
+  if (!equipment || !available) {
+    container.innerHTML = '<p class="form-error">Aucun équipement disponible sur cette période.</p>';
+    submitButton.disabled = true;
+    $('#modal-title').textContent = 'Aucun équipement disponible aux dates choisies';
+    $('#loan-form').dataset.epsSelection = '[]';
+    return;
+  }
+  equipment.requested_quantity = Math.min(equipment.requested_quantity, available);
+  container.innerHTML = `<div class="book-quantity-item"><div><strong>${escapeHtml(equipment.Equipement)}</strong><span>Disponible sur cette période : ${available}</span></div><label>Quantité<input data-eps-quantity type="number" min="1" max="${available}" value="${equipment.requested_quantity}" required></label></div>`;
+  submitButton.disabled = false;
+  $('#modal-title').textContent = `${equipment.Equipement} × ${equipment.requested_quantity}`;
+  const updateSelection = () => $('#loan-form').dataset.epsSelection = JSON.stringify([{ id: equipment.id, quantity: equipment.requested_quantity }]);
+  updateSelection();
+  container.querySelector('[data-eps-quantity]').addEventListener('input', (event) => {
+    const input = event.currentTarget;
+    equipment.requested_quantity = Math.min(available, Math.max(1, Math.floor(Number(input.value) || 1)));
+    input.value = equipment.requested_quantity;
+    $('#modal-title').textContent = `${equipment.Equipement} × ${equipment.requested_quantity}`;
+    updateSelection();
+  });
+}
 function openModal(date) {
   const form = $('#loan-form');
   const startInput = $('#loan-start-date');
@@ -628,14 +782,20 @@ function openModal(date) {
     ? state.selectedBooks.map((item) => `${item.Titre} × ${item.requested_quantity}`).join(' + ')
     : state.collection === 'digital'
       ? state.selectedEquipment.map((item) => `${item.Equipement} × ${item.requested_quantity}`).join(' + ')
+      : state.collection === 'eps'
+        ? state.selectedEps.map((item) => `${item.Equipement} × ${item.requested_quantity}`).join(' + ')
       : state.selectedGames.map((item) => item.Jeu).join(' + ');
   form.dataset.gameIds = JSON.stringify(state.selectedGames.map((item) => item.id));
   form.dataset.bookSelection = JSON.stringify(state.selectedBooks.map((item) => ({ id: item.id, quantity: item.requested_quantity })));
   form.dataset.digitalSelection = JSON.stringify(state.selectedEquipment.map((item) => ({ id: item.id, quantity: item.requested_quantity })));
+  form.dataset.epsSelection = JSON.stringify(state.selectedEps.map((item) => ({ id: item.id, quantity: item.requested_quantity })));
   form.dataset.collection = state.collection;
   form.reset();
-  $('#loan-modal-eyebrow').textContent = state.collection === 'digital' ? 'Pré-réservation soumise à validation' : 'Nouvelle réservation';
+  $('#loan-modal-eyebrow').textContent = state.collection === 'digital' || state.collection === 'eps'
+    ? 'Pré-réservation soumise à validation'
+    : 'Nouvelle réservation';
   form.querySelector('button[type="submit"]').firstChild.textContent = state.collection === 'digital'
+    || state.collection === 'eps'
     ? 'Enregistrer la pré-réservation '
     : 'Enregistrer la réservation ';
   startInput.value = date;
@@ -650,6 +810,7 @@ function openModal(date) {
     $('#modal-date').textContent = `Du ${formatDate(startInput.value)} au ${formatDate(endInput.value)}`;
     renderBookQuantityFields(startInput.value, endInput.value);
     renderDigitalQuantityFields(startInput.value, endInput.value);
+    renderEpsQuantityFields(startInput.value, endInput.value);
   };
   startInput.onchange = updateDates;
   endInput.onchange = updateDates;
@@ -667,25 +828,29 @@ async function submitLoan(event) {
   const gameIds = JSON.parse(form.dataset.gameIds);
   const bookSelection = JSON.parse(form.dataset.bookSelection || '[]');
   const digitalSelection = JSON.parse(form.dataset.digitalSelection || '[]');
+  const epsSelection = JSON.parse(form.dataset.epsSelection || '[]');
   const isBooks = form.dataset.collection === 'books';
   const isDigital = form.dataset.collection === 'digital';
+  const isEPS = form.dataset.collection === 'eps';
   const loanDate = data.loan_date;
   const endDate = data.end_date;
   const summary = isBooks
     ? bookSelection.map((item) => `${state.books.find((book) => book.id === item.id)?.Titre || 'Série'} × ${item.quantity}`).join(', ')
     : isDigital
       ? digitalSelection.map((item) => `${state.equipment.find((equipment) => equipment.id === item.id)?.Equipement || 'Équipement'} × ${item.quantity}`).join(', ')
+      : isEPS
+        ? epsSelection.map((item) => `${state.epsEquipment.find((equipment) => equipment.id === item.id)?.Equipement || 'Équipement EPS'} × ${item.quantity}`).join(', ')
       : `${gameIds.length} jeu${gameIds.length > 1 ? 'x' : ''}`;
-  const bookingType = isDigital ? 'la pré-réservation' : 'la réservation';
+  const bookingType = isDigital || isEPS ? 'la pré-réservation' : 'la réservation';
   if (!confirm(`Confirmer ${bookingType} de ${summary} du ${formatDate(loanDate)} au ${formatDate(endDate)} ?`)) return;
   const printWindow = window.open('', '_blank');
-  const endpoint = isBooks ? '/api/book-loans/batch' : isDigital ? '/api/digital-loans/batch' : '/api/loans/batch';
-  const payload = isBooks ? { ...data, books: bookSelection } : isDigital ? { ...data, equipment: digitalSelection } : { ...data, game_ids: gameIds };
+  const endpoint = isBooks ? '/api/book-loans/batch' : isDigital ? '/api/digital-loans/batch' : isEPS ? '/api/eps-loans/batch' : '/api/loans/batch';
+  const payload = isBooks ? { ...data, books: bookSelection } : isDigital ? { ...data, equipment: digitalSelection } : isEPS ? { ...data, equipment: epsSelection } : { ...data, game_ids: gameIds };
   const response = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
   const result = await response.json();
   if (!response.ok) {
     printWindow?.close();
-    if (isDigital && response.status === 409 && result.detail?.startsWith('Stock insuffisant')) {
+    if ((isDigital || isEPS) && response.status === 409 && result.detail?.startsWith('Stock insuffisant')) {
       alert(result.detail);
     }
     $('#form-error').textContent = result.detail || 'La réservation n’a pas pu être enregistrée.';
@@ -696,8 +861,10 @@ async function submitLoan(event) {
     ? bookSelection.map((item) => `${state.books.find((book) => book.id === item.id)?.Titre || 'Série'} × ${item.quantity}`)
     : isDigital
       ? digitalSelection.map((item) => `${state.equipment.find((equipment) => equipment.id === item.id)?.Equipement || 'Équipement'} × ${item.quantity}`)
+      : isEPS
+        ? epsSelection.map((item) => `${state.epsEquipment.find((equipment) => equipment.id === item.id)?.Equipement || 'Équipement EPS'} × ${item.quantity}`)
       : state.selectedGames;
-  if (printWindow) printSheet(isDigital ? 'Fiche de pré-réservation' : 'Fiche d’emprunt', data, resources, loanDate, returnDate, printWindow);
+  if (printWindow) printSheet(isDigital || isEPS ? 'Fiche de pré-réservation' : 'Fiche d’emprunt', data, resources, loanDate, returnDate, printWindow);
   if (isBooks) {
     state.bookLoans.push(...result);
     closeModal();
@@ -711,6 +878,12 @@ async function submitLoan(event) {
     renderDigitalCalendar();
     clearEquipmentSelection();
     refreshDigitalData().catch((error) => console.error('Actualisation du stock numérique après pré-réservation impossible :', error));
+  } else if (isEPS) {
+    state.epsLoans.push(...result);
+    closeModal();
+    renderEPSCalendar();
+    clearEpsSelection();
+    refreshEPSData().catch((error) => console.error('Actualisation du stock EPS après pré-réservation impossible :', error));
   } else {
     state.loans.push(...result);
     closeModal();
@@ -737,7 +910,7 @@ async function submitLoan(event) {
     : managerEmailStatus === 'partial'
       ? `Seul un des gestionnaires a été informé : ${managerEmailError ? decodeURIComponent(managerEmailError) : 'un envoi a échoué'}.`
       : `Échec du courriel au gestionnaire : ${managerEmailError ? decodeURIComponent(managerEmailError) : 'aucun détail reçu'}.`;
-  if (isDigital) {
+  if (isDigital || isEPS) {
     const messages = ['Pré-réservation enregistrée.'];
     messages.push(emailStatus === 'sent'
       ? 'Le courriel de réception a été envoyé au demandeur.'
@@ -752,6 +925,7 @@ async function submitLoan(event) {
     }
     if (stockStatus === 'failed') messages.push('La mise à jour du stock Grist a échoué.');
     messages.push(printStatus);
+    if (isEPS) messages[0] = 'Pré-réservation EPS enregistrée.';
     showToast(messages.join(' '));
   } else {
     showToast(`Réservation enregistrée. ${printStatus} ${emailMessage} ${managerEmailMessage}`);
@@ -780,6 +954,14 @@ function activeDigitalBookings() {
     booking.entries.push(loan);
   }
   return [...grouped.values()].sort((first, second) => first.return_date.localeCompare(second.return_date));
+}
+function pendingEpsBookings() {
+  return allBookings('eps').filter((booking) => !booking.is_approved && booking.is_active)
+    .sort((first, second) => first.loan_date.localeCompare(second.loan_date));
+}
+function activeEpsBookings() {
+  return allBookings('eps').filter((booking) => booking.is_active)
+    .sort((first, second) => first.return_date.localeCompare(second.return_date));
 }
 function ensurePendingReservationsModal() {
   let modal = $('#pending-reservations-modal');
@@ -884,6 +1066,81 @@ function showPendingReservations() {
   }
   modal.hidden = false;
 }
+function ensureEpsManagerModal(id, title, closeId) {
+  let modal = $(`#${id}`);
+  if (modal) return modal;
+  modal = document.createElement('div');
+  modal.id = id;
+  modal.className = 'modal-backdrop';
+  modal.hidden = true;
+  modal.innerHTML = `<div class="modal manage-modal" role="dialog" aria-modal="true"><button class="modal-close" id="${closeId}" type="button" aria-label="Fermer">×</button><p class="eyebrow">Espace gestionnaire</p><h2>${title}</h2><p class="modal-note">Sélectionnez une réservation pour consulter son détail et ses actions.</p><div id="${id}-list"></div></div>`;
+  document.body.append(modal);
+  modal.addEventListener('click', (event) => { if (event.target === modal) modal.hidden = true; });
+  modal.querySelector(`#${closeId}`).addEventListener('click', () => { modal.hidden = true; });
+  return modal;
+}
+function openEpsBooking(booking) {
+  const modal = $('#eps-loans-modal');
+  if (modal) modal.hidden = true;
+  const pendingModal = $('#eps-pending-modal');
+  if (pendingModal) pendingModal.hidden = true;
+  state.collection = 'eps';
+  const equipment = state.epsEquipment.find((item) => item.id === booking.equipment_id);
+  state.selectedEps = equipment ? [{ ...equipment, requested_quantity: 1 }] : [];
+  const today = iso(new Date());
+  const date = today < booking.loan_date ? booking.loan_date : today;
+  state.month = new Date(`${date}T12:00:00`);
+  if (location.hash !== '#eps') location.hash = '#eps';
+  route();
+  document.querySelectorAll('#eps-body tr').forEach((row) => {
+    const selected = state.selectedEps.some((item) => item.id === Number(row.dataset.epsId));
+    row.classList.toggle('selected', selected);
+    row.querySelector('input[type="radio"]').checked = selected;
+  });
+  $('#eps-empty-calendar').hidden = !state.selectedEps.length;
+  $('#eps-calendar-content').hidden = !state.selectedEps.length;
+  if (equipment) $('#eps-selected').textContent = equipment.Equipement;
+  renderEPSCalendar();
+  openManageModal(date, booking.id);
+}
+function showEpsLoans() {
+  const modal = ensureEpsManagerModal('eps-loans-modal', 'Emprunts EPS', 'close-eps-loans');
+  const bookings = activeEpsBookings();
+  const list = modal.querySelector('#eps-loans-modal-list');
+  if (!bookings.length) list.innerHTML = '<p class="modal-note">Aucun emprunt EPS en cours.</p>';
+  else {
+    list.innerHTML = `<div class="table-wrap"><table class="digital-loans-table"><thead><tr><th>Nom de l’équipement</th><th>Emprunté par</th><th>Du… au…</th></tr></thead><tbody>${bookings.map((booking, index) => `<tr><td><button class="digital-loan-open" data-eps-booking="${index}" type="button">${escapeHtml(booking.equipment_name)} × ${escapeHtml(booking.quantity)}</button></td><td>${escapeHtml(booking.first_name)} ${escapeHtml(booking.name)}</td><td>Du ${formatDate(booking.loan_date)} au ${formatDate(booking.return_date)}</td></tr>`).join('')}</tbody></table></div>`;
+    list.querySelectorAll('[data-eps-booking]').forEach((button) => button.addEventListener('click', () => {
+      const booking = bookings[Number(button.dataset.epsBooking)];
+      if (booking) openEpsBooking(booking);
+    }));
+  }
+  modal.hidden = false;
+}
+function showPendingEpsReservations() {
+  const modal = ensureEpsManagerModal('eps-pending-modal', 'EPS à valider', 'close-eps-pending');
+  const bookings = pendingEpsBookings();
+  const list = modal.querySelector('#eps-pending-modal-list');
+  if (!bookings.length) list.innerHTML = '<p class="modal-note">Aucune pré-réservation EPS en attente de validation.</p>';
+  else {
+    list.innerHTML = bookings.map((booking, index) => `<article class="manage-item"><div><strong>${escapeHtml(booking.equipment_name)} × ${escapeHtml(booking.quantity)}</strong><span>${escapeHtml(booking.first_name)} ${escapeHtml(booking.name)} · ${formatDate(booking.loan_date)} au ${formatDate(booking.return_date)}</span></div><div class="manage-actions"><button class="secondary-button" data-eps-pending="${index}" type="button">Ouvrir</button></div></article>`).join('');
+    list.querySelectorAll('[data-eps-pending]').forEach((button) => button.addEventListener('click', () => {
+      const booking = bookings[Number(button.dataset.epsPending)];
+      if (booking) openEpsBooking(booking);
+    }));
+  }
+  modal.hidden = false;
+}
+function updatePendingEpsButton() {
+  const button = $('#eps-pending-button');
+  if (!button) return;
+  const count = pendingEpsBookings().length;
+  button.textContent = `EPS à valider (${count})`;
+  button.setAttribute('aria-label', `${count} réservation${count === 1 ? '' : 's'} EPS en attente de validation`);
+  button.classList.toggle('has-pending', count > 0);
+  const modal = $('#eps-pending-modal');
+  if (!count && modal && !modal.hidden) modal.hidden = true;
+}
 function syncManagerButtons() {
   $('#manager-button').hidden = state.manager;
   $('#logout-manager').hidden = !state.manager;
@@ -908,6 +1165,27 @@ function syncManagerButtons() {
     document.querySelector('.header-tools').insertBefore(loansButton, $('#logout-manager'));
   }
   loansButton.hidden = !state.manager;
+  let epsPendingButton = $('#eps-pending-button');
+  if (!epsPendingButton) {
+    epsPendingButton = document.createElement('button');
+    epsPendingButton.id = 'eps-pending-button';
+    epsPendingButton.className = 'manager-button pending-reservations-button';
+    epsPendingButton.type = 'button';
+    epsPendingButton.addEventListener('click', showPendingEpsReservations);
+    document.querySelector('.header-tools').insertBefore(epsPendingButton, $('#logout-manager'));
+  }
+  epsPendingButton.hidden = !state.manager;
+  let epsLoansButton = $('#eps-loans-button');
+  if (!epsLoansButton) {
+    epsLoansButton = document.createElement('button');
+    epsLoansButton.id = 'eps-loans-button';
+    epsLoansButton.className = 'manager-button';
+    epsLoansButton.type = 'button';
+    epsLoansButton.textContent = 'Emprunts EPS';
+    epsLoansButton.addEventListener('click', showEpsLoans);
+    document.querySelector('.header-tools').insertBefore(epsLoansButton, $('#logout-manager'));
+  }
+  epsLoansButton.hidden = !state.manager;
   let bookingsButton = $('#manager-bookings-button');
   if (!bookingsButton) {
     bookingsButton = document.createElement('button');
@@ -920,10 +1198,11 @@ function syncManagerButtons() {
   }
   bookingsButton.hidden = !state.manager;
   updatePendingReservationsButton();
+  updatePendingEpsButton();
 }
 window.addEventListener('hashchange', syncManagerButtons);
 syncManagerButtons();
-async function loginManager(event) { event.preventDefault(); const form = event.currentTarget; const response = await fetch('/api/manager/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: form.password.value }) }); const result = await response.json(); if (!response.ok) { $('#manager-error').textContent = result.detail || 'Connexion impossible.'; return; } state.manager = true; syncManagerButtons(); form.reset(); $('#manager-modal').hidden = true; if (state.selectedGames.length) renderCalendar(); if (state.selectedBooks.length) renderSeriesCalendar(); if (state.selectedEquipment.length) renderDigitalCalendar(); try { await loadDigital(); const pending = pendingDigitalBookings(); if (pending.length) showPendingReservations(); else await showManagerBookings(); } catch (error) { showToast(`Mode gestionnaire activé, mais les réservations n’ont pas pu être chargées : ${error.message}`); } }
+async function loginManager(event) { event.preventDefault(); const form = event.currentTarget; const response = await fetch('/api/manager/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: form.password.value }) }); const result = await response.json(); if (!response.ok) { $('#manager-error').textContent = result.detail || 'Connexion impossible.'; return; } state.manager = true; syncManagerButtons(); form.reset(); $('#manager-modal').hidden = true; if (state.selectedGames.length) renderCalendar(); if (state.selectedBooks.length) renderSeriesCalendar(); if (state.selectedEquipment.length) renderDigitalCalendar(); try { await Promise.all([loadDigital(), loadEPS()]); const pending = pendingDigitalBookings(); const pendingEps = pendingEpsBookings(); if (pending.length) showPendingReservations(); else if (pendingEps.length) showPendingEpsReservations(); else await showManagerBookings(); } catch (error) { showToast(`Mode gestionnaire activé, mais les réservations n’ont pas pu être chargées : ${error.message}`); } }
 function openManagerModal() { $('#manager-error').textContent = ''; $('#manager-modal').hidden = false; $('#manager-password').focus(); }
 function closeManagerModal() { $('#manager-modal').hidden = true; }
 async function logoutManager() {
@@ -934,14 +1213,18 @@ async function logoutManager() {
   $('#games-view').hidden = true;
   $('#series-view').hidden = true;
   $('#digital-view').hidden = true;
+  $('#eps-view').hidden = true;
   if (location.hash !== '#home') location.hash = '#home';
   try { clearGameSelection(); } catch (error) { console.error('Nettoyage de la sélection des jeux impossible :', error); }
   try { clearBookSelection(); } catch (error) { console.error('Nettoyage de la sélection des séries impossible :', error); }
   try { clearEquipmentSelection(); } catch (error) { console.error('Nettoyage de la sélection numérique impossible :', error); }
+  try { clearEpsSelection(); } catch (error) { console.error('Nettoyage de la sélection EPS impossible :', error); }
   closeManageModal();
   closeManagerModal();
   const pendingModal = $('#pending-reservations-modal');
   if (pendingModal) pendingModal.hidden = true;
+  const epsPendingModal = $('#eps-pending-modal');
+  if (epsPendingModal) epsPendingModal.hidden = true;
   try {
     const response = await fetch('/api/manager/logout', { method: 'POST', cache: 'no-store', credentials: 'same-origin' });
     const result = await response.json().catch(() => ({}));
@@ -958,6 +1241,8 @@ function bookingResources(booking) {
     ? `${state.books.find((item) => item.id === loan.book_id)?.Titre || 'Série'} × ${loan.quantity}`
     : booking.collection === 'digital'
       ? `${state.equipment.find((item) => item.id === loan.equipment_id)?.Equipement || loan.equipment_name || 'Équipement'} × ${loan.quantity}`
+      : booking.collection === 'eps'
+        ? `${state.epsEquipment.find((item) => item.id === loan.equipment_id)?.Equipement || loan.equipment_name || 'Matériel EPS'} × ${loan.quantity}`
       : state.games.find((item) => item.id === loan.game_id)?.Jeu || 'Jeu');
 }
 function openManageModal(date, bookingId) {
@@ -971,16 +1256,17 @@ function openManageModal(date, bookingId) {
   $('#manage-date').textContent = formatDate(date);
   $('#manage-list').innerHTML = bookings.map((booking) => {
     const resources = bookingResources(booking);
-    const status = booking.collection === 'digital' ? booking.is_approved ? ' · Validée' : ' · En attente de validation' : '';
-    const approvalControl = state.manager && booking.collection === 'digital'
+    const isEquipment = booking.collection === 'digital' || booking.collection === 'eps';
+    const status = isEquipment ? booking.is_approved ? ' · Validée' : ' · En attente de validation' : '';
+    const approvalControl = state.manager && isEquipment
       ? `<label class="manager-approval"><input type="checkbox" data-approve-id="${booking.id}" ${booking.is_approved ? 'checked' : ''} ${booking.is_approved && booking.confirmation_sent ? 'disabled' : ''} ${booking.is_approved && !booking.confirmation_sent ? 'title="Cliquer pour réessayer l’envoi du courriel"' : ''}> Validée</label>`
       : '';
-    const reminderAction = booking.collection === 'digital'
+    const reminderAction = isEquipment
       && booking.entries.every((loan) => loan.is_active)
       && booking.return_date <= iso(new Date())
       ? `<button class="secondary-button" data-reminder-id="${booking.id}" type="button">Envoyer un rappel</button>`
       : '';
-    const returnAction = booking.collection === 'digital' && !booking.is_approved
+    const returnAction = isEquipment && !booking.is_approved
       ? ''
       : `<button class="secondary-button" data-return-id="${booking.id}" data-return-date="${date}" type="button">Enregistrer le retour à cette date</button>`;
     const managerActions = state.manager
@@ -1005,7 +1291,8 @@ async function approveDigitalBooking(id, control) {
   }
   control.disabled = true;
   try {
-    const response = await fetch('/api/digital-loans/approve', {
+    const eps = booking.collection === 'eps';
+    const response = await fetch(eps ? '/api/eps-loans/approve' : '/api/digital-loans/approve', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ loan_ids: booking.ids.map(Number) }),
@@ -1013,11 +1300,17 @@ async function approveDigitalBooking(id, control) {
     const result = await response.json();
     if (!response.ok) throw new Error(result.detail || 'La validation n’a pas pu être enregistrée dans Grist.');
     const ids = new Set(booking.ids.map(String));
-    state.digitalLoans = state.digitalLoans.map((loan) => ids.has(String(loan.id))
+    const source = eps ? state.epsLoans : state.digitalLoans;
+    const updated = source.map((loan) => ids.has(String(loan.id))
       ? { ...loan, is_approved: true, confirmation_sent: result.email_status === 'sent' }
       : loan);
+    if (eps) state.epsLoans = updated;
+    else state.digitalLoans = updated;
     updatePendingReservationsButton();
-    if (state.selectedEquipment.length) renderDigitalCalendar();
+    if (eps) {
+      updatePendingEpsButton();
+      if (state.selectedEps.length) renderEPSCalendar();
+    } else if (state.selectedEquipment.length) renderDigitalCalendar();
     openManageModal($('#manage-modal').dataset.date, booking.id);
     if (result.email_status === 'sent' && result.tracking_status === 'saved') {
       showToast('Réservation validée et courriel de confirmation envoyé.');
@@ -1037,7 +1330,7 @@ async function sendDigitalReminder(id, control) {
   if (!booking) return;
   control.disabled = true;
   try {
-    const response = await fetch('/api/digital-loans/reminder', {
+    const response = await fetch(booking.collection === 'eps' ? '/api/eps-loans/reminder' : '/api/digital-loans/reminder', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ loan_ids: booking.ids.map(Number) }),
@@ -1069,20 +1362,23 @@ async function returnLoan(id, date) {
   }
   const occupiedUntil = iso(new Date(new Date(`${date}T12:00:00`).getTime() - 86400000));
   const ids = new Set(booking.ids.map(String));
-  const source = booking.collection === 'books' ? state.bookLoans : booking.collection === 'digital' ? state.digitalLoans : state.loans;
+  const source = booking.collection === 'books' ? state.bookLoans : booking.collection === 'digital' ? state.digitalLoans : booking.collection === 'eps' ? state.epsLoans : state.loans;
   const updated = source.map((loan) => ids.has(String(loan.id))
     ? { ...loan, return_date: date, occupied_until: occupiedUntil, is_active: false }
     : loan);
   if (booking.collection === 'books') state.bookLoans = updated;
   else if (booking.collection === 'digital') state.digitalLoans = updated;
+  else if (booking.collection === 'eps') state.epsLoans = updated;
   else state.loans = updated;
   const resources = bookingResources(booking);
   closeManageModal();
   if (booking.collection === 'books') renderSeriesCalendar();
   else if (booking.collection === 'digital') renderDigitalCalendar();
+  else if (booking.collection === 'eps') renderEPSCalendar();
   else renderCalendar();
   if (printWindow) printSheet('Fiche de retour', booking, resources, booking.loan_date, date, printWindow);
   if (booking.collection === 'digital') refreshDigitalData().catch((error) => console.error('Actualisation du stock numérique après retour impossible :', error));
+  if (booking.collection === 'eps') refreshEPSData().catch((error) => console.error('Actualisation du stock EPS après retour impossible :', error));
   showToast(`Retour enregistré dans Grist.${printWindow ? ' Fiche prête à imprimer en PDF.' : ''}`);
 }
 async function deleteBooking(id, returnDate) {
@@ -1105,22 +1401,26 @@ async function deleteBooking(id, returnDate) {
   const removedIds = new Set(booking.ids.map(String));
   if (booking.collection === 'books') state.bookLoans = state.bookLoans.filter((loan) => !removedIds.has(String(loan.id)));
   else if (booking.collection === 'digital') state.digitalLoans = state.digitalLoans.filter((loan) => !removedIds.has(String(loan.id)));
+  else if (booking.collection === 'eps') state.epsLoans = state.epsLoans.filter((loan) => !removedIds.has(String(loan.id)));
   else state.loans = state.loans.filter((loan) => !removedIds.has(String(loan.id)));
   if (booking.collection === 'digital') updatePendingReservationsButton();
+  if (booking.collection === 'eps') updatePendingEpsButton();
   closeManageModal();
   if (booking.collection === 'books') renderSeriesCalendar();
   else if (booking.collection === 'digital') renderDigitalCalendar();
+  else if (booking.collection === 'eps') renderEPSCalendar();
   else renderCalendar();
   const resources = bookingResources(booking);
   if (printWindow) printSheet('Fiche de retour', booking, resources, booking.loan_date, returnDate, printWindow);
   if (booking.collection === 'digital') refreshDigitalData().catch((error) => console.error('Actualisation du stock numérique après annulation impossible :', error));
+  if (booking.collection === 'eps') refreshEPSData().catch((error) => console.error('Actualisation du stock EPS après annulation impossible :', error));
   if (result.email_status === 'sent') showToast('Annulation enregistrée et courriel envoyé à l’emprunteur.');
   else showToast(`Annulation enregistrée, mais le courriel à l’emprunteur a échoué : ${result.email_error || 'aucun détail reçu'}.`);
 }
 function printLoan(id) {
   const booking = allBookings().find((item) => item.id === id);
   if (!booking) return;
-  printSheet(booking.collection === 'digital' && !booking.is_approved ? 'Fiche de pré-réservation' : 'Fiche d’emprunt',
+  printSheet((booking.collection === 'digital' || booking.collection === 'eps') && !booking.is_approved ? 'Fiche de pré-réservation' : 'Fiche d’emprunt',
     booking, bookingResources(booking), booking.loan_date, booking.return_date);
 }
 function printSheet(title, borrower, resources, loanDate, returnDate, printWindow = window.open('', '_blank')) { if (!printWindow) return; const resourceList = resources.map((resource) => `<li>${escapeHtml(typeof resource === 'string' ? resource : resource.Jeu)}</li>`).join(''); printWindow.document.open(); printWindow.document.write(`<title>${escapeHtml(title)}</title><style>body{font:16px Arial;max-width:680px;margin:50px auto;color:#182c28}h1{font-size:28px;border-bottom:2px solid #18734a;padding-bottom:14px}h2{font-size:18px;margin-top:32px}p{margin:18px 0}strong{display:block;font-size:12px;text-transform:uppercase;color:#18734a;margin-bottom:5px}li{margin:8px 0}.print-action{border:0;background:#18734a;color:#fff;padding:12px 18px;font:bold 14px Arial;cursor:pointer}@media print{body{margin:20mm auto}.print-action{display:none}}</style><button class="print-action" type="button" onclick="window.print()">Imprimer cette fiche</button><h1>${escapeHtml(title)}</h1><p><strong>Nom</strong>${escapeHtml(borrower.name)}</p><p><strong>Prénom</strong>${escapeHtml(borrower.first_name)}</p><p><strong>Mail professionnel</strong>${escapeHtml(borrower.professional_email)}</p><p><strong>École</strong>${escapeHtml(borrower.school)}</p><h2>Ressources empruntées</h2><ul>${resourceList}</ul><p><strong>Date d’emprunt</strong>${formatDate(loanDate)}</p><p><strong>Date de retour</strong>${formatDate(returnDate)}</p>`); printWindow.document.close(); window.focus(); }
@@ -1128,11 +1428,13 @@ function route() {
   const games = location.hash === '#jeux';
   const books = location.hash === '#series';
   const digital = location.hash === '#numerique';
-  state.collection = digital ? 'digital' : books ? 'books' : 'games';
-  $('#home-view').hidden = games || books || digital;
+  const eps = location.hash === '#eps';
+  state.collection = eps ? 'eps' : digital ? 'digital' : books ? 'books' : 'games';
+  $('#home-view').hidden = games || books || digital || eps;
   $('#games-view').hidden = !games;
   $('#series-view').hidden = !books;
   $('#digital-view').hidden = !digital;
+  $('#eps-view').hidden = !eps;
   if (games && !state.games.length) loadGames().catch((error) => {
     $('#games-body').innerHTML = `<tr><td colspan="6" class="loading">${escapeHtml(error.message)}</td></tr>`;
   });
@@ -1148,5 +1450,11 @@ function route() {
   else if (digital) refreshDigitalData().then(() => {
     if (state.selectedEquipment.length) renderDigitalCalendar();
   }).catch((error) => console.error('Actualisation du matériel numérique impossible :', error));
+  if (eps && !state.epsEquipment.length) loadEPS().catch((error) => {
+    $('#eps-body').innerHTML = `<tr><td colspan="4" class="loading">${escapeHtml(error.message)}</td></tr>`;
+  });
+  else if (eps) refreshEPSData().then(() => {
+    if (state.selectedEps.length) renderEPSCalendar();
+  }).catch((error) => console.error('Actualisation du matériel EPS impossible :', error));
 }
-window.addEventListener('hashchange', route); window.addEventListener('focus', refreshLoansWhenVisible); document.addEventListener('visibilitychange', refreshLoansWhenVisible); setInterval(refreshLoansWhenVisible, 15000); $('#previous-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() - 1); renderCalendar(); }); $('#next-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() + 1); renderCalendar(); }); $('#series-previous-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() - 1); renderSeriesCalendar(); }); $('#series-next-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() + 1); renderSeriesCalendar(); }); $('#digital-previous-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() - 1); renderDigitalCalendar(); }); $('#digital-next-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() + 1); renderDigitalCalendar(); }); $('#close-modal').addEventListener('click', closeModal); $('#loan-modal').addEventListener('click', (event) => { if (event.target.id === 'loan-modal') closeModal(); }); $('#loan-form').addEventListener('submit', submitLoan); $('#manager-button').addEventListener('click', openManagerModal); $('#manager-modal').addEventListener('click', (event) => { if (event.target.id === 'manager-modal') closeManagerModal(); }); $('#close-manager-modal').addEventListener('click', closeManagerModal); $('#manager-form').addEventListener('submit', loginManager); $('#manage-modal').addEventListener('click', (event) => { if (event.target.id === 'manage-modal') closeManageModal(); }); $('#close-manage-modal').addEventListener('click', closeManageModal); document.addEventListener('keydown', (event) => { if (event.key === 'Escape') { if (!$('#loan-modal').hidden) closeModal(); if (!$('#manager-modal').hidden) closeManagerModal(); if (!$('#manage-modal').hidden) closeManageModal(); const pendingModal = $('#pending-reservations-modal'); if (pendingModal && !pendingModal.hidden) pendingModal.hidden = true; const digitalLoansModal = $('#digital-loans-modal'); if (digitalLoansModal && !digitalLoansModal.hidden) digitalLoansModal.hidden = true; } }); route();
+window.addEventListener('hashchange', route); window.addEventListener('focus', refreshLoansWhenVisible); document.addEventListener('visibilitychange', refreshLoansWhenVisible); setInterval(refreshLoansWhenVisible, 15000); $('#previous-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() - 1); renderCalendar(); }); $('#next-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() + 1); renderCalendar(); }); $('#series-previous-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() - 1); renderSeriesCalendar(); }); $('#series-next-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() + 1); renderSeriesCalendar(); }); $('#digital-previous-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() - 1); renderDigitalCalendar(); }); $('#digital-next-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() + 1); renderDigitalCalendar(); }); $('#eps-previous-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() - 1); renderEPSCalendar(); }); $('#eps-next-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() + 1); renderEPSCalendar(); }); $('#close-modal').addEventListener('click', closeModal); $('#loan-modal').addEventListener('click', (event) => { if (event.target.id === 'loan-modal') closeModal(); }); $('#loan-form').addEventListener('submit', submitLoan); $('#manager-button').addEventListener('click', openManagerModal); $('#manager-modal').addEventListener('click', (event) => { if (event.target.id === 'manager-modal') closeManagerModal(); }); $('#close-manager-modal').addEventListener('click', closeManagerModal); $('#manager-form').addEventListener('submit', loginManager); $('#manage-modal').addEventListener('click', (event) => { if (event.target.id === 'manage-modal') closeManageModal(); }); $('#close-manage-modal').addEventListener('click', closeManageModal); document.addEventListener('keydown', (event) => { if (event.key === 'Escape') { if (!$('#loan-modal').hidden) closeModal(); if (!$('#manager-modal').hidden) closeManagerModal(); if (!$('#manage-modal').hidden) closeManageModal(); const pendingModal = $('#pending-reservations-modal'); if (pendingModal && !pendingModal.hidden) pendingModal.hidden = true; const digitalLoansModal = $('#digital-loans-modal'); if (digitalLoansModal && !digitalLoansModal.hidden) digitalLoansModal.hidden = true; const epsLoansModal = $('#eps-loans-modal'); if (epsLoansModal && !epsLoansModal.hidden) epsLoansModal.hidden = true; const epsPendingModal = $('#eps-pending-modal'); if (epsPendingModal && !epsPendingModal.hidden) epsPendingModal.hidden = true; } }); route();

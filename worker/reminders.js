@@ -1,6 +1,7 @@
 import { assertConfigured, gristRequest, normalizeBookLoan, normalizeLoan } from './functions/_grist.js';
 import { bookLoansTable, booksTable, isActiveBookLoan } from './functions/_books.js';
 import { digitalInventoryTable, digitalLoansTable, normalizeDigitalLoan } from './functions/_digital.js';
+import { epsInventoryTable, epsLoansTable, normalizeEpsLoan } from './functions/_eps.js';
 import { sendMail } from './functions/_mail.js';
 
 const TIME_ZONE = 'Europe/Paris';
@@ -58,10 +59,15 @@ async function sendReminders(env, now) {
     gristRequest(env, digitalInventoryTable(env)),
     gristRequest(env, digitalLoansTable(env)),
   ]);
+  const [epsInventory, epsPayload] = await Promise.all([
+    gristRequest(env, epsInventoryTable(env)),
+    gristRequest(env, epsLoansTable(env)),
+  ]);
   const groups = new Map();
   const bookStarts = new Map();
   const bookReturns = new Map();
   const digitalReturns = new Map();
+  const epsReturns = new Map();
   const overdueGames = new Map();
   const overdueBooks = new Map();
   const gameConfirmations = new Map();
@@ -162,10 +168,25 @@ async function sendReminders(env, now) {
     group.quantities.set(loan.equipment_id, (group.quantities.get(loan.equipment_id) || 0) + loan.quantity);
     group.alreadySent ||= hasDate(fields.Rappel_Envoye);
   }
+  for (const record of epsPayload.records || []) {
+    const fields = record.fields || {};
+    if (!(fields.Validee === true || fields.Validee === 1) || hasDate(fields.Retour) || hasDate(fields.Date_Annulation)) continue;
+    const loan = normalizeEpsLoan(record, epsInventory.records || []);
+    if (loan.return_date !== reminderDate) continue;
+    const key = reminderKey(loan);
+    if (!epsReturns.has(key)) {
+      epsReturns.set(key, { borrower: loan, records: [], quantities: new Map(), alreadySent: false });
+    }
+    const group = epsReturns.get(key);
+    group.records.push(record);
+    group.quantities.set(loan.equipment_id, (group.quantities.get(loan.equipment_id) || 0) + loan.quantity);
+    group.alreadySent ||= hasDate(fields.Rappel_Envoye);
+  }
   const dueDigitalGroups = [...digitalReturns.values()].filter((group) => !group.alreadySent);
+  const dueEpsGroups = [...epsReturns.values()].filter((group) => !group.alreadySent);
   const dueOverdueGames = [...overdueGames.values()].filter((group) => !group.alreadySent);
   const dueOverdueBooks = [...overdueBooks.values()].filter((group) => !group.alreadySent);
-  if (!dueGroups.length && !dueBookGroups.length && !dueDigitalGroups.length
+  if (!dueGroups.length && !dueBookGroups.length && !dueDigitalGroups.length && !dueEpsGroups.length
     && !dueOverdueGames.length && !dueOverdueBooks.length
     && !gameConfirmations.size && !bookConfirmations.size) return;
 
@@ -344,6 +365,33 @@ async function sendReminders(env, now) {
         console.log(`Rappel numérique envoyé pour ${loan.professional_email} (${loan.return_date}).`);
       } catch (error) {
         console.error(`Échec du courriel numérique pour ${loan.professional_email} :`, error.message);
+      }
+    }
+  }
+  if (dueEpsGroups.length) {
+    const equipmentById = new Map((epsInventory.records || []).map((record) => [
+      Number(record.id), record.fields?.Matériel ?? record.fields?.Materiel ?? `Matériel ${record.id}`,
+    ]));
+    for (const group of dueEpsGroups) {
+      const loan = group.borrower;
+      const equipmentList = [...group.quantities]
+        .map(([id, quantity]) => `- ${equipmentById.get(id) || `Matériel ${id}`} × ${quantity}`)
+        .join('\n');
+      try {
+        await sendMail(env, {
+          to: loan.professional_email,
+          subject: 'Rappel : retour de votre matériel EPS dans 3 jours',
+          text: `Bonjour ${loan.first_name} ${loan.name},\n\nNous vous rappelons que le retour prévu pour :\n${equipmentList}\nest le ${formatDate(loan.return_date)}.\n\nMédiathèque`,
+        });
+        await gristRequest(env, epsLoansTable(env), {
+          method: 'PATCH',
+          body: JSON.stringify({
+            records: group.records.map((record) => ({ id: record.id, fields: { Rappel_Envoye: today } })),
+          }),
+        });
+        console.log(`Rappel EPS envoyé pour ${loan.professional_email} (${loan.return_date}).`);
+      } catch (error) {
+        console.error(`Échec du rappel EPS pour ${loan.professional_email} :`, error.message);
       }
     }
   }

@@ -6,7 +6,7 @@ Application JavaScript de reservation de ressources pour la mediatheque de l'Edu
 
 - `public/` : interface web statique JavaScript.
 - `functions/` : Cloudflare Pages Functions, API JavaScript connectee a Grist.
-- Grist : source des tables `Inventaire_des_jeux` et `Table1`.
+- Grist : source des inventaires et réservations de jeux, livres/albums, matériel numérique et matériel EPS.
 
 ## Deploiement Cloudflare Pages
 
@@ -30,6 +30,8 @@ GRIST_BOOKS_INVENTORY_TABLE=Inventaire livres albums
 GRIST_BOOKS_LOANS_TABLE=Emprunts livres albums
 GRIST_DIGITAL_INVENTORY_TABLE=Inventaire Numerique
 GRIST_DIGITAL_LOANS_TABLE=Emprunts Numeriques
+GRIST_EPS_INVENTORY_TABLE=Inventaire EPS
+GRIST_EPS_LOANS_TABLE=Emprunts EPS
 GRIST_LOANS_TABLE=Table1
 GRIST_SCHOOLS_TABLE=Ecoles
 GRIST_ENABLED=true
@@ -38,7 +40,7 @@ MANAGER_EMAIL1=premiere-adresse-du-gestionnaire
 MANAGER_EMAIL2=seconde-adresse-du-gestionnaire
 ```
 
-Les secrets Grist, SMTP et le mot de passe gestionnaire doivent etre saisis dans Cloudflare, jamais dans GitHub. Configurer `MANAGER_EMAIL1` et `MANAGER_EMAIL2` avec les adresses des gestionnaires; chaque adresse renseignée reçoit une notification pour les nouvelles réservations de jeux, de livres/albums et de matériel numérique. Pour les courriels, configurer `SMTP_USER`, `SMTP_PASSWORD` et `SMTP_FROM`; `SMTP_HOST` et `SMTP_PORT` sont facultatifs (par défaut `smtps.ac-nancy-metz.fr` et `465`, TLS implicite). Le serveur doit autoriser SMTP AUTH LOGIN et l’envoi depuis cette adresse. La réservation est conservée dans Grist même si un courriel échoue; le formulaire indique le résultat des envois à l’emprunteur et aux gestionnaires. Le mot de passe gestionnaire permet d’enregistrer dans Grist un retour anticipé ou une annulation, d’imprimer une fiche d’emprunt ou de retour et de gérer les réservations dans le calendrier. La table `Ecoles` fournit les choix du formulaire (par défaut, colonne `Ecole`, `École` ou `Nom`).
+Les secrets Grist, SMTP et le mot de passe gestionnaire doivent etre saisis dans Cloudflare, jamais dans GitHub. Configurer `MANAGER_EMAIL1` et `MANAGER_EMAIL2` avec les adresses des gestionnaires; chaque adresse renseignée reçoit une notification pour les nouvelles réservations de jeux, de livres/albums et de matériel numérique ou EPS. Pour les courriels, configurer `SMTP_USER`, `SMTP_PASSWORD` et `SMTP_FROM`; `SMTP_HOST` et `SMTP_PORT` sont facultatifs (par défaut `smtps.ac-nancy-metz.fr` et `465`, TLS implicite). Le serveur doit autoriser SMTP AUTH LOGIN et l’envoi depuis cette adresse. La réservation est conservée dans Grist même si un courriel échoue; le formulaire indique le résultat des envois à l’emprunteur et aux gestionnaires. Le mot de passe gestionnaire permet d’enregistrer dans Grist un retour anticipé ou une annulation, d’imprimer une fiche d’emprunt ou de retour et de gérer les réservations dans le calendrier. Les pré-réservations EPS et numériques disposent chacune de boutons de validation et de suivi des emprunts. La table `Ecoles` fournit les choix du formulaire (par défaut, colonne `Ecole`, `École` ou `Nom`).
 
 ## Developpement local
 
@@ -72,7 +74,7 @@ Ne pas utiliser `npx wrangler deploy` : cette commande concerne les Workers clas
 
 ## Rappels de retour
 
-Le Worker `mediatheque-rappels-emprunts` s'exécute chaque jour à 08:00 UTC (09:00 en hiver, 10:00 en été, heure de Paris) et envoie un rappel trois jours avant la fin prévue pour les jeux et livres/albums. Après un envoi réussi, il enregistre la date dans `Rappel_Envoye` pour éviter les doublons. Si un emprunt n'est pas rendu à la date prévue, le Worker envoie une alerte aux gestionnaires, avec les détails de la réservation, sa date de retour prévue et le lien de l'interface; `Retard_Notification_Envoyee` évite les alertes répétées. Les confirmations partent à la création; si un envoi échoue, le Worker les retente chaque jour jusqu'à ce qu'il puisse enregistrer `Confirmation_Envoyee`. Ajouter ces colonnes comme colonnes Date aux tables d'emprunts concernées.
+Le Worker `mediatheque-rappels-emprunts` s'exécute chaque jour à 08:00 UTC (09:00 en hiver, 10:00 en été, heure de Paris) et envoie un rappel trois jours avant la fin prévue pour les jeux, livres/albums et matériel EPS. Après un envoi réussi, il enregistre la date dans `Rappel_Envoye` pour éviter les doublons. Si un emprunt n'est pas rendu à la date prévue, le Worker envoie une alerte aux gestionnaires, avec les détails de la réservation, sa date de retour prévue et le lien de l'interface; `Retard_Notification_Envoyee` évite les alertes répétées. Les confirmations partent à la création; si un envoi échoue, le Worker les retente chaque jour jusqu'à ce qu'il puisse enregistrer `Confirmation_Envoyee`. Ajouter ces colonnes comme colonnes Date aux tables d'emprunts concernées.
 
 Les secrets du Worker de rappels sont distincts de ceux de Pages. Depuis `worker/`, les créer avec `npx wrangler secret put` pour chacun de ces noms : `GRIST_API_KEY`, `GRIST_DOC_ID`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`, `MANAGER_EMAIL1` et `MANAGER_EMAIL2`. Déployer ensuite avec `npm run deploy:reminders`. Les paramètres non secrets (tables, URL de l'interface et serveur SMTP) sont dans `wrangler.reminders.toml`; adapter `MANAGER_INTERFACE_URL` si l'application utilise un domaine personnalisé.
 
@@ -93,5 +95,9 @@ Matériel numérique : une réservation crée une ligne par équipement dans `Em
 Inventaire numérique (`Inventaire Numerique`) : `Equipement`, `Marque`, `Type`, `Quantite` (ou `Quantité`), `Qte_empruntee` et `Reste`. `Quantite` est le stock total. L’application recalcule `Qte_empruntee` depuis les pré-réservations et emprunts actifs; `Reste` doit être une colonne calculée par Grist (par exemple `Quantite - Qte_empruntee`).
 
 Emprunts numériques (`Emprunts Numeriques`) : `Nom`, `Prenom`, `Mail_professionnel`, `Ecole`, `Date_Emprunt`, `Date_Retour_prevu`, `Equipement` (référence vers l’inventaire), `Quantite`, `Validee` (case à cocher), `Retour`, `Date_Annulation`, `Demande_Envoyee`, `Confirmation_Envoyee` et `Rappel_Envoye`. Ajouter les colonnes de suivi des courriels comme colonnes Date. Le Worker lit `Date_Retour_prevu` pour calculer le rappel à trois jours. Une fiche avec plusieurs équipements est enregistrée sur plusieurs lignes, une par équipement.
+
+Inventaire EPS (`Inventaire EPS`) : `Matériel`, `Quantite` (ou `Quantité`), `Qte_empruntee` et `Reste`. `Quantite` est le stock total; l’application maintient `Qte_empruntee` depuis les pré-réservations et emprunts actifs. Les demandes EPS sont limitées à un seul type de matériel par fiche, avec une quantité bornée au stock disponible pour toute la période.
+
+Emprunts EPS (`Emprunts EPS`) : `Nom`, `Prenom`, `Mail_professionnel`, `Ecole`, `Date_Emprunt`, `Date_Retour_prevu`, `Materiel` (référence vers l’inventaire), `Quantite`, `Validee` (case à cocher), `Retour`, `Date_Annulation`, `Demande_Envoyee`, `Confirmation_Envoyee` et `Rappel_Envoye`. Les colonnes de suivi des courriels sont de type Date. La validation envoie une confirmation avec les modalités de récupération; l’annulation informe l’emprunteur qu’il doit contacter la circonscription.
 
 Une reservation groupant plusieurs jeux cree une ligne Grist par jeu, pour la meme periode.

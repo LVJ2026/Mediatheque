@@ -1,6 +1,7 @@
 import { assertConfigured, gristRequest } from '../../_grist.js';
 import { bookLoansTable, loansTable, syncCurrentBookAvailability } from '../../_books.js';
 import { digitalLoansTable, digitalInventoryTable, syncDigitalAvailability } from '../../_digital.js';
+import { epsInventoryTable, epsLoansTable, syncEpsAvailability } from '../../_eps.js';
 import { isManager, unauthorized } from '../../_manager.js';
 
 export async function onRequestPost({ request, env, waitUntil }) {
@@ -18,7 +19,8 @@ export async function onRequestPost({ request, env, waitUntil }) {
     }
     const isBooks = input.collection === 'books';
     const isDigital = input.collection === 'digital';
-    const table = isBooks ? bookLoansTable(env) : isDigital ? digitalLoansTable(env) : loansTable(env);
+    const isEps = input.collection === 'eps';
+    const table = isBooks ? bookLoansTable(env) : isDigital ? digitalLoansTable(env) : isEps ? epsLoansTable(env) : loansTable(env);
     const records = input.loan_ids.map((id) => ({ id: Number(id), fields: { Retour: input.return_date } }));
     await gristRequest(env, table, {
       method: 'PATCH',
@@ -34,6 +36,12 @@ export async function onRequestPost({ request, env, waitUntil }) {
         Number(record.id), Number(record.fields?.Quantite ?? record.fields?.['Quantité'] ?? 0),
       ]));
       await syncDigitalAvailability(env, totals);
+    } else if (isEps) {
+      const inventory = await gristRequest(env, epsInventoryTable(env));
+      const totals = new Map((inventory.records || []).map((record) => [
+        Number(record.id), Number(record.fields?.Quantite ?? record.fields?.['Quantité'] ?? 0),
+      ]));
+      await syncEpsAvailability(env, totals);
     }
     return Response.json({ updated: records.length });
   } catch (error) {
