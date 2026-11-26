@@ -19,3 +19,4 @@ main#home-view .hero h1{font-size:clamp(20px,4vw,52px);white-space:nowrap;letter
 @media(max-width:800px){.collection-grid{grid-template-columns:1fr}.collection-card:nth-child(n){grid-column:1;grid-row:auto;min-height:145px}}
 .manager-dashboard{max-width:1240px;margin:0 auto;padding:0 5vw 18px}.manager-dashboard>.eyebrow{margin:0 0 10px}.manager-dashboard-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.manager-dashboard-grid .manager-button{min-height:64px;padding:14px 18px;text-align:left;font-size:13px}
 @media(max-width:600px){.manager-dashboard{padding:0 20px 20px}.manager-dashboard-grid{grid-template-columns:1fr}}
+.collection-card>span:first-child{display:none}
