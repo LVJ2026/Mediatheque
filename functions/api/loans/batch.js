@@ -1,5 +1,5 @@
 import { assertConfigured, gristRequest, normalizeLoan } from '../../_grist.js';
-import { sendMail } from '../../_mail.js';
+import { sendMail, sendManagerMail } from '../../_mail.js';
 
 function dateInParis(date) {
   const parts = new Intl.DateTimeFormat('en-CA', {
@@ -18,18 +18,21 @@ function isValidDate(value) {
   return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
 }
 
-async function sendConfirmationEmail(env, input, created) {
+async function loadGameNames(env, gameIds) {
+  const gamesById = new Map();
   try {
-    const gamesById = new Map();
-    try {
-      const gamesPayload = await gristRequest(env, env.GRIST_INVENTORY_TABLE || 'Inventaire_des_jeux');
-      for (const record of gamesPayload.records || []) {
-        gamesById.set(Number(record.id), record.fields?.Jeu || `Jeu ${record.id}`);
-      }
-    } catch (error) {
-      console.error('Noms des jeux indisponibles pour le courriel :', error.message);
+    const gamesPayload = await gristRequest(env, env.GRIST_INVENTORY_TABLE || 'Inventaire_des_jeux');
+    for (const record of gamesPayload.records || []) {
+      gamesById.set(Number(record.id), record.fields?.Jeu || `Jeu ${record.id}`);
     }
-    const gameNames = input.game_ids.map((gameId) => gamesById.get(Number(gameId)) || `Jeu ${gameId}`);
+  } catch (error) {
+    console.error('Noms des jeux indisponibles pour le courriel :', error.message);
+  }
+  return gameIds.map((gameId) => gamesById.get(Number(gameId)) || `Jeu ${gameId}`);
+}
+
+async function sendConfirmationEmail(env, input, created, gameNames) {
+  try {
     const formatDate = (value) => new Intl.DateTimeFormat('fr-FR', { dateStyle: 'long', timeZone: 'UTC' }).format(new Date(`${value}T12:00:00Z`));
     const gameList = gameNames.map((name) => `- ${name}`).join('\n');
     await sendMail(env, {
@@ -53,7 +56,7 @@ async function sendConfirmationEmail(env, input, created) {
   }
 }
 
-export async function onRequestPost({ request, env, waitUntil }) {
+export async function onRequestPost({ request, env }) {
   try {
     assertConfigured(env);
     const input = await request.json();
@@ -92,14 +95,18 @@ export async function onRequestPost({ request, env, waitUntil }) {
       fields: records[index].fields,
     }));
 
-    const emailTask = sendConfirmationEmail(env, input, created);
-    if (waitUntil) {
-      waitUntil(emailTask);
-      return Response.json(loans, { status: 201, headers: { 'X-Email-Status': 'sending' } });
-    }
-    const emailResult = await emailTask;
+    const gameNames = await loadGameNames(env, input.game_ids);
+    const [emailResult, managerEmailResult] = await Promise.all([
+      sendConfirmationEmail(env, input, created, gameNames),
+      sendManagerMail(env, {
+        subject: 'Nouvelle réservation de jeux',
+        text: `Une nouvelle réservation de jeux a été enregistrée.\n\nDemandeur : ${input.first_name} ${input.name}\nÉcole : ${input.school}\nCourriel : ${input.professional_email}\nDu ${input.loan_date} au ${input.end_date}.\n\nJeux :\n${gameNames.map((name) => `- ${name}`).join('\n')}`,
+      }),
+    ]);
     const headers = { 'X-Email-Status': emailResult.sent ? 'sent' : 'failed' };
+    headers['X-Manager-Email-Status'] = managerEmailResult.status;
     if (emailResult.error) headers['X-Email-Error'] = encodeURIComponent(emailResult.error);
+    if (managerEmailResult.error) headers['X-Manager-Email-Error'] = encodeURIComponent(managerEmailResult.error);
     return Response.json(loans, { status: 201, headers });
 
   

@@ -1,6 +1,6 @@
 import { addDays, assertConfigured, gristRequest, normalizeBookLoan } from '../../_grist.js';
 import { bookId, bookLoansTable, loadBookStock, syncBookAvailability } from '../../_books.js';
-import { sendMail } from '../../_mail.js';
+import { sendMail, sendManagerMail } from '../../_mail.js';
 
 function dateInParis(date) {
   const parts = new Intl.DateTimeFormat('en-CA', {
@@ -112,13 +112,27 @@ export async function onRequestPost({ request, env, waitUntil }) {
       id: created.records?.[index]?.id,
       fields: record.fields,
     }, inventoryPayload.records || []));
-    const backgroundTasks = Promise.all([
-      syncBookAvailability(env, totals).catch((error) => console.error('Mise à jour du stock livres impossible :', error.message)),
+    const stockTask = syncBookAvailability(env, totals)
+      .catch((error) => console.error('Mise à jour du stock livres impossible :', error.message));
+    if (waitUntil) waitUntil(stockTask);
+    else await stockTask;
+
+    const formatDate = (value) => new Intl.DateTimeFormat('fr-FR', { dateStyle: 'long', timeZone: 'UTC' }).format(new Date(`${value}T12:00:00Z`));
+    const bookList = records.map(({ fields }) => `- ${inventory.get(Number(fields.Titre))?.fields?.Titre || `Série ${fields.Titre}`} × ${fields.Quantite}`).join('\n');
+    const [email, managerEmail] = await Promise.all([
       sendReservationConfirmation(env, input, records, created, inventory),
+      sendManagerMail(env, {
+        subject: 'Nouvelle réservation de livres et albums',
+        text: `Une nouvelle réservation de livres et albums a été enregistrée.\n\nDemandeur : ${input.first_name} ${input.name}\nÉcole : ${input.school}\nCourriel : ${input.professional_email}\nDu ${formatDate(input.loan_date)} au ${formatDate(input.end_date)}.\n\nLivres et albums :\n${bookList}`,
+      }),
     ]);
-    if (waitUntil) waitUntil(backgroundTasks);
-    else await backgroundTasks;
-    return Response.json(loans, { status: 201, headers: { 'X-Email-Status': 'sending' } });
+    const headers = {
+      'X-Email-Status': email.status,
+      'X-Manager-Email-Status': managerEmail.status,
+    };
+    if (email.error) headers['X-Email-Error'] = encodeURIComponent(email.error);
+    if (managerEmail.error) headers['X-Manager-Email-Error'] = encodeURIComponent(managerEmail.error);
+    return Response.json(loans, { status: 201, headers });
   } catch (error) {
     return Response.json({ detail: error.message }, { status: 503 });
   }

@@ -4,8 +4,8 @@ Application JavaScript de reservation de ressources pour la mediatheque de l'Edu
 
 ## Architecture
 
-- `worker/public/` : interface web statique JavaScript.
-- `worker/functions/` : Cloudflare Pages Functions, API JavaScript connectee a Grist.
+- `public/` : interface web statique JavaScript.
+- `functions/` : Cloudflare Pages Functions, API JavaScript connectee a Grist.
 - Grist : source des tables `Inventaire_des_jeux` et `Table1`.
 
 ## Deploiement Cloudflare Pages
@@ -38,19 +38,20 @@ MANAGER_EMAIL1=premiere-adresse-du-gestionnaire
 MANAGER_EMAIL2=seconde-adresse-du-gestionnaire
 ```
 
-Les secrets Grist, SMTP et le mot de passe gestionnaire doivent etre saisis dans Cloudflare, jamais dans GitHub. Configurer `MANAGER_EMAIL1` et `MANAGER_EMAIL2` avec les adresses qui doivent recevoir les nouvelles pré-réservations numériques; chaque adresse renseignée reçoit une notification. Pour les courriels, configurer `SMTP_USER`, `SMTP_PASSWORD` et `SMTP_FROM`; `SMTP_HOST` et `SMTP_PORT` sont facultatifs (par défaut `smtps.ac-nancy-metz.fr` et `465`, TLS implicite). Le serveur doit autoriser SMTP AUTH LOGIN et l’envoi depuis cette adresse. La réservation est conservée dans Grist même si un courriel échoue. Le mot de passe gestionnaire permet d’enregistrer dans Grist un retour anticipé ou une annulation, d’imprimer une fiche d’emprunt ou de retour et de gérer les réservations dans le calendrier. La table `Ecoles` fournit les choix du formulaire (par défaut, colonne `Ecole`, `École` ou `Nom`).
+Les secrets Grist, SMTP et le mot de passe gestionnaire doivent etre saisis dans Cloudflare, jamais dans GitHub. Configurer `MANAGER_EMAIL1` et `MANAGER_EMAIL2` avec les adresses des gestionnaires; chaque adresse renseignée reçoit une notification pour les nouvelles réservations de jeux, de livres/albums et de matériel numérique. Pour les courriels, configurer `SMTP_USER`, `SMTP_PASSWORD` et `SMTP_FROM`; `SMTP_HOST` et `SMTP_PORT` sont facultatifs (par défaut `smtps.ac-nancy-metz.fr` et `465`, TLS implicite). Le serveur doit autoriser SMTP AUTH LOGIN et l’envoi depuis cette adresse. La réservation est conservée dans Grist même si un courriel échoue; le formulaire indique le résultat des envois à l’emprunteur et aux gestionnaires. Le mot de passe gestionnaire permet d’enregistrer dans Grist un retour anticipé ou une annulation, d’imprimer une fiche d’emprunt ou de retour et de gérer les réservations dans le calendrier. La table `Ecoles` fournit les choix du formulaire (par défaut, colonne `Ecole`, `École` ou `Nom`).
 
 ## Developpement local
 
 Installer Node.js LTS, puis depuis `worker/` :
 
 ```powershell
+cd worker
 npm install
-Copy-Item .dev.vars.example .dev.vars
-npx wrangler pages dev public
+Copy-Item .dev.vars.example ..\.dev.vars
+npm run dev
 ```
 
-Le fichier `.dev.vars` contient les variables locales et ne doit jamais etre committe.
+Le fichier `.dev.vars` à la racine contient les variables locales et ne doit jamais etre committe. Les commandes de développement et de déploiement depuis `worker/` utilisent les fonctions et fichiers statiques à la racine.
 
 ## Deploiement manuel
 

@@ -732,6 +732,11 @@ async function submitLoan(event) {
     : emailStatus === 'sent'
       ? 'Le courriel de confirmation a été envoyé.'
       : `Échec du courriel : ${emailError ? decodeURIComponent(emailError) : 'aucun détail reçu'}.`;
+  const managerEmailMessage = managerEmailStatus === 'sent'
+    ? 'Le gestionnaire a été informé.'
+    : managerEmailStatus === 'partial'
+      ? `Seul un des gestionnaires a été informé : ${managerEmailError ? decodeURIComponent(managerEmailError) : 'un envoi a échoué'}.`
+      : `Échec du courriel au gestionnaire : ${managerEmailError ? decodeURIComponent(managerEmailError) : 'aucun détail reçu'}.`;
   if (isDigital) {
     const messages = ['Pré-réservation enregistrée.'];
     messages.push(emailStatus === 'sent'
@@ -749,7 +754,7 @@ async function submitLoan(event) {
     messages.push(printStatus);
     showToast(messages.join(' '));
   } else {
-    showToast(`Réservation enregistrée. ${printStatus} ${emailMessage}`);
+    showToast(`Réservation enregistrée. ${printStatus} ${emailMessage} ${managerEmailMessage}`);
   }
 }
 function pendingDigitalBookings() {

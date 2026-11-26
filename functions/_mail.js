@@ -108,3 +108,30 @@ export async function sendMail(env, { to, subject, text }) {
     socket.close();
   }
 }
+
+export async function sendManagerMail(env, { subject, text }) {
+  const recipients = [...new Set([env.MANAGER_EMAIL1, env.MANAGER_EMAIL2]
+    .map((email) => typeof email === 'string' ? email.trim() : '')
+    .filter(Boolean))];
+  if (!recipients.length) {
+    return { status: 'failed', error: 'Aucune adresse MANAGER_EMAIL1 ou MANAGER_EMAIL2 n’est configurée dans Cloudflare.' };
+  }
+
+  const errors = [];
+  let sent = 0;
+  for (const to of recipients) {
+    try {
+      await sendMail(env, { to, subject, text });
+      sent += 1;
+    } catch (error) {
+      const message = String(error.message || 'Erreur SMTP inconnue').slice(0, 200);
+      errors.push(message);
+      console.error('Échec du courriel de notification à un gestionnaire :', message);
+    }
+  }
+
+  return {
+    status: sent === recipients.length ? 'sent' : sent ? 'partial' : 'failed',
+    error: errors.join(' '),
+  };
+}
