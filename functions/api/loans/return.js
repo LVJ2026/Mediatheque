@@ -1,7 +1,7 @@
 import { assertConfigured, gristRequest } from '../../_grist.js';
 import { bookLoansTable, loansTable, syncCurrentBookAvailability } from '../../_books.js';
 import { digitalLoansTable, digitalInventoryTable, syncDigitalAvailability } from '../../_digital.js';
-import { epsInventoryTable, epsLoansTable, syncEpsAvailability } from '../../_eps.js';
+import { epsLoansTable } from '../../_eps.js';
 import { isManager, unauthorized } from '../../_manager.js';
 
 export async function onRequestPost({ request, env, waitUntil }) {
@@ -36,12 +36,6 @@ export async function onRequestPost({ request, env, waitUntil }) {
         Number(record.id), Number(record.fields?.Quantite ?? record.fields?.['Quantité'] ?? 0),
       ]));
       await syncDigitalAvailability(env, totals);
-    } else if (isEps) {
-      const inventory = await gristRequest(env, epsInventoryTable(env));
-      const totals = new Map((inventory.records || []).map((record) => [
-        Number(record.id), Number(record.fields?.Quantite ?? record.fields?.['Quantité'] ?? 0),
-      ]));
-      await syncEpsAvailability(env, totals);
     }
     return Response.json({ updated: records.length });
   } catch (error) {

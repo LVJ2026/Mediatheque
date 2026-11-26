@@ -431,17 +431,9 @@ function toggleEquipment(id) {
 function toggleEps(id) {
   const equipment = state.epsEquipment.find((item) => item.id === id);
   if (!equipment || equipment.quantity < 1) return;
-  state.selectedEps = state.selectedEps.some((item) => item.id === id)
-    ? []
-    : [{ ...equipment, requested_quantity: 1 }];
+  state.selectedEps = [{ ...equipment, requested_quantity: 1 }];
   const today = iso(new Date());
-  const nextReservation = state.epsLoans
-    .filter((loan) => loan.is_active && loan.equipment_id === id && loan.return_date >= today)
-    .sort((first, second) => first.loan_date.localeCompare(second.loan_date))
-    .find((loan) => loan.loan_date <= today && today <= loan.occupied_until)
-    || state.epsLoans.filter((loan) => loan.is_active && loan.equipment_id === id && loan.loan_date >= today)
-      .sort((first, second) => first.loan_date.localeCompare(second.loan_date))[0];
-  state.month = nextReservation ? new Date(`${nextReservation.loan_date}T12:00:00`) : new Date();
+  state.month = new Date();
   document.querySelectorAll('#eps-body tr').forEach((row) => {
     const selected = state.selectedEps.some((item) => item.id === Number(row.dataset.epsId));
     row.classList.toggle('selected', selected);
@@ -452,6 +444,7 @@ function toggleEps(id) {
   if (state.selectedEps.length) {
     $('#eps-selected').textContent = state.selectedEps[0].Equipement;
     renderEPSCalendar();
+    openModal(today);
   }
 }
 function clearGameSelection() {

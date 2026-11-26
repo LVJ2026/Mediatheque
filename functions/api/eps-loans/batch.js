@@ -4,7 +4,6 @@ import {
   epsLoansTable,
   loadEpsStock,
   normalizeEpsLoan,
-  syncEpsAvailability,
 } from '../../_eps.js';
 import { sendMail } from '../../_mail.js';
 
@@ -137,16 +136,8 @@ export async function onRequestPost({ request, env }) {
       body: JSON.stringify({ records: [record] }),
     });
     const result = normalizeEpsLoan({ id: created.records?.[0]?.id, ...record }, inventory.records || []);
-    let stockStatus = 'updated';
-    try {
-      await syncEpsAvailability(env, totals);
-    } catch (error) {
-      stockStatus = 'failed';
-      console.error('Mise à jour du stock EPS impossible après pré-réservation :', error.message);
-    }
     const email = await sendRequestEmails(env, { ...input, interface_url: request.url }, inventoryById, created);
     const headers = {
-      'X-Stock-Status': stockStatus,
       'X-Email-Status': email.borrowerStatus,
       'X-Email-Tracking-Status': email.trackingStatus,
       'X-Manager-Email-Status': email.managerStatus,

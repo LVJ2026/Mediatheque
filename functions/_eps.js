@@ -29,8 +29,8 @@ function normalizeEpsEquipment(record) {
   return {
     id: Number(record.id),
     Equipement: name,
-    quantity: Number(fields.Quantite ?? fields['Quantité'] ?? 0),
-    available_quantity: Number(fields.Reste ?? 0),
+    quantity: Number(fields.Quantite_EPS ?? 0),
+    available_quantity: Number(fields['Quantite _restante'] ?? fields.Quantite_restante ?? 0),
   };
 }
 
@@ -77,40 +77,10 @@ async function loadEpsStock(env) {
   ]);
   const totals = new Map((inventory.records || []).map((record) => [
     Number(record.id),
-    Number(record.fields?.Quantite ?? record.fields?.['Quantité'] ?? 0),
+    Number(record.fields?.Quantite_EPS ?? 0),
   ]));
   const activeLoans = (loans.records || []).filter((record) => isActiveEpsLoan(record.fields || {}));
   return { inventory, loans, totals, activeLoans };
-}
-
-async function syncEpsAvailability(env, totals, inventoryPayload, loansPayload) {
-  const [inventory, loans] = inventoryPayload && loansPayload
-    ? [inventoryPayload, loansPayload]
-    : await Promise.all([
-      gristRequest(env, epsInventoryTable(env)),
-      gristRequest(env, epsLoansTable(env)),
-    ]);
-  const borrowed = new Map([...totals.keys()].map((id) => [id, 0]));
-  for (const record of loans.records || []) {
-    const fields = record.fields || {};
-    if (!isActiveEpsLoan(fields)) continue;
-    const id = epsEquipmentId(fields);
-    if (borrowed.has(id)) borrowed.set(id, borrowed.get(id) + epsQuantity(fields));
-  }
-  const records = (inventory.records || [])
-    .filter((record) => totals.has(Number(record.id)))
-    .filter((record) => Number(record.fields?.Qte_empruntee ?? 0) !== borrowed.get(Number(record.id)))
-    .map((record) => ({
-      id: record.id,
-      fields: { Qte_empruntee: borrowed.get(Number(record.id)) },
-    }));
-  if (records.length) {
-    await gristRequest(env, epsInventoryTable(env), {
-      method: 'PATCH',
-      body: JSON.stringify({ records }),
-    });
-  }
-  return borrowed;
 }
 
 function overlapsEpsLoan(loan, start, end) {
@@ -143,5 +113,4 @@ export {
   loadEpsStock,
   normalizeEpsEquipment,
   normalizeEpsLoan,
-  syncEpsAvailability,
 };
