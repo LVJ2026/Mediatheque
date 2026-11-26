@@ -990,7 +990,7 @@ function updatePendingReservationsButton() {
   const button = $('#pending-reservations-button');
   if (!button) return;
   const count = pendingDigitalBookings().length;
-  button.textContent = `À valider (${count})`;
+  button.textContent = `Numérique à valider (${count})`;
   button.setAttribute('aria-label', `${count} réservation${count === 1 ? '' : 's'} numérique${count === 1 ? '' : 's'} en attente de validation`);
   button.classList.toggle('has-pending', count > 0);
   const modal = $('#pending-reservations-modal');
@@ -1143,25 +1143,15 @@ function syncManagerButtons() {
     dashboard.id = 'manager-dashboard';
     dashboard.className = 'manager-dashboard';
     dashboard.setAttribute('aria-label', 'Actions de gestionnaire');
-    dashboard.innerHTML = '<p class="eyebrow">Espace gestionnaire</p><div class="manager-dashboard-grid"><button id="digital-loans-button" class="manager-button" type="button">Emprunts numériques</button><button id="pending-reservations-button" class="manager-button pending-reservations-button" type="button"></button><button id="eps-loans-button" class="manager-button" type="button">Emprunts EPS</button><button id="eps-pending-button" class="manager-button pending-reservations-button" type="button"></button></div>';
+    dashboard.innerHTML = '<p class="eyebrow">Espace gestionnaire</p><div class="manager-dashboard-grid"><button id="digital-loans-button" class="manager-button" type="button">Emprunts numériques</button><button id="pending-reservations-button" class="manager-button pending-reservations-button" type="button"></button><button id="eps-loans-button" class="manager-button" type="button">Emprunts EPS</button><button id="eps-pending-button" class="manager-button pending-reservations-button" type="button"></button><button id="manager-bookings-button" class="manager-button" type="button">Réservations jeux et livres</button></div>';
     $('#home-view').querySelector('.hero').after(dashboard);
     $('#digital-loans-button').addEventListener('click', showDigitalLoans);
     $('#pending-reservations-button').addEventListener('click', showPendingReservations);
     $('#eps-loans-button').addEventListener('click', showEpsLoans);
     $('#eps-pending-button').addEventListener('click', showPendingEpsReservations);
+    $('#manager-bookings-button').addEventListener('click', showManagerBookings);
   }
   dashboard.hidden = !state.manager;
-  let bookingsButton = $('#manager-bookings-button');
-  if (!bookingsButton) {
-    bookingsButton = document.createElement('button');
-    bookingsButton.id = 'manager-bookings-button';
-    bookingsButton.className = 'manager-button';
-    bookingsButton.type = 'button';
-    bookingsButton.textContent = 'Réservations jeux et livres';
-    bookingsButton.addEventListener('click', showManagerBookings);
-    document.querySelector('.header-tools').insertBefore(bookingsButton, $('#logout-manager'));
-  }
-  bookingsButton.hidden = !state.manager;
   updatePendingReservationsButton();
   updatePendingEpsButton();
 }
