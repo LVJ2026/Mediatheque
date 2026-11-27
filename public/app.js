@@ -5,6 +5,52 @@ const iso = (date) => { const local = new Date(date); local.setMinutes(local.get
 const formatDate = (value) => new Intl.DateTimeFormat('fr-FR', { dateStyle: 'full' }).format(new Date(`${value}T12:00:00`));
 const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[character]);
 const normalizeSearchText = (value) => String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLocaleLowerCase('fr-FR');
+const sortAlphabetically = (items, field) => [...items].sort((first, second) =>
+  String(first[field] ?? '').localeCompare(String(second[field] ?? ''), 'fr', { sensitivity: 'base', numeric: true }));
+function filterInventoryRows(inputId, bodyId, emptyId, additionalFilter = () => true) {
+  const query = normalizeSearchText($(`#${inputId}`).value);
+  let visibleCount = 0;
+  document.querySelectorAll(`#${bodyId} tr`).forEach((row) => {
+    const matches = normalizeSearchText(row.dataset.searchKey).includes(query) && additionalFilter(row);
+    row.hidden = !matches;
+    if (matches) visibleCount += 1;
+  });
+  $(`#${emptyId}`).hidden = visibleCount > 0;
+}
+function addAlphabeticalSearch(viewId, inputId, bodyId, emptyId, emptyMessage, onInput) {
+  const panel = $(`#${viewId} .table-panel`);
+  const table = panel.querySelector('.table-wrap');
+  const label = document.createElement('label');
+  label.className = 'series-search';
+  label.htmlFor = inputId;
+  label.append('Rechercher par nom (première colonne)');
+  const input = document.createElement('input');
+  input.id = inputId;
+  input.type = 'search';
+  input.autocomplete = 'off';
+  input.placeholder = 'Saisir un nom';
+  label.append(input);
+  const empty = document.createElement('p');
+  empty.id = emptyId;
+  empty.className = 'no-search-results';
+  empty.setAttribute('role', 'status');
+  empty.textContent = emptyMessage;
+  empty.hidden = true;
+  table.before(label);
+  table.after(empty);
+  input.addEventListener('input', onInput || (() => filterInventoryRows(inputId, bodyId, emptyId)));
+}
+for (const [view, body, text] of [
+  ['games-view', 'games-body', 'Aucun jeu ne correspond à la recherche.'],
+  ['digital-view', 'digital-body', 'Aucun équipement ne correspond à la recherche.'],
+  ['eps-view', 'eps-body', 'Aucun matériel EPS ne correspond à la recherche.'],
+  ['pedagogy-view', 'pedagogy-body', 'Aucun livre pédagogique ne correspond à la recherche.'],
+  ['science-view', 'science-body', 'Aucun matériel scientifique ne correspond à la recherche.'],
+]) {
+  const input = `${body}-search`;
+  addAlphabeticalSearch(view, input, body, `${body}-no-results`, text,
+    view === 'digital-view' ? filterDigitalEquipmentByType : undefined);
+}
 const pedagogyCard = document.querySelector('.collection-books');
 pedagogyCard.href = '#pedagogie';
 pedagogyCard.querySelector('b').insertAdjacentHTML('beforebegin', '<small class="collection-note">Pré-réservation soumise à validation des gestionnaires</small>');
@@ -19,12 +65,13 @@ $('#loan-form').querySelector('.primary-button').before(scienceAvailability);
 async function loadGames() {
   const [gamesResponse, loansResponse] = await Promise.all([fetch('/api/games'), fetch('/api/loans')]);
   if (!gamesResponse.ok || !loansResponse.ok) throw new Error('Impossible de charger les données Grist.');
-  state.games = await gamesResponse.json();
+  state.games = sortAlphabetically(await gamesResponse.json(), 'Jeu');
   console.table(state.games.map(({ id, Jeu }) => ({ id, Jeu })));
   state.loans = await loansResponse.json();
   loadSchools();
   $('#game-count').textContent = `${state.games.length} jeu${state.games.length > 1 ? 'x' : ''}`;
-  $('#games-body').innerHTML = state.games.map((game) => `<tr data-game-id="${game.id}"><td class="selection-cell"><input type="checkbox" aria-label="Sélectionner ${escapeHtml(game.Jeu)}"></td><td><strong>${escapeHtml(game.Jeu)}</strong></td><td>${escapeHtml(game.Marque) || '—'}</td><td>${escapeHtml(game['Âge indiqué']) || '—'}</td><td>${escapeHtml(game.Joueurs) || '—'}</td><td>${escapeHtml(game.Remarques) || '—'}</td></tr>`).join('');
+  $('#games-body').innerHTML = state.games.map((game) => `<tr data-game-id="${game.id}" data-search-key="${escapeHtml(game.Jeu)}"><td class="selection-cell"><input type="checkbox" aria-label="Sélectionner ${escapeHtml(game.Jeu)}"></td><td><strong>${escapeHtml(game.Jeu)}</strong></td><td>${escapeHtml(game.Marque) || '—'}</td><td>${escapeHtml(game['Âge indiqué']) || '—'}</td><td>${escapeHtml(game.Joueurs) || '—'}</td><td>${escapeHtml(game.Remarques) || '—'}</td></tr>`).join('');
+  filterInventoryRows('games-body-search', 'games-body', 'games-body-no-results');
   document.querySelectorAll('#games-body tr').forEach((row) => { row.addEventListener('click', () => toggleGame(Number(row.dataset.gameId))); const checkbox = row.querySelector('input'); checkbox.addEventListener('click', (event) => event.stopPropagation()); checkbox.addEventListener('change', () => toggleGame(Number(row.dataset.gameId))); });
 }
 function ensureManagerBookingsModal() {
@@ -158,7 +205,7 @@ async function loadDigital() {
     const detail = await failedResponse.json().catch(() => ({}));
     throw new Error(detail.detail || 'Impossible de charger l’inventaire et les pré-réservations numériques.');
   }
-  state.equipment = await inventoryResponse.json();
+  state.equipment = sortAlphabetically(await inventoryResponse.json(), 'Equipement');
   state.digitalLoans = await loansResponse.json();
   updatePendingReservationsButton();
   loadSchools();
@@ -173,7 +220,7 @@ async function loadDigital() {
     typeFilter.addEventListener('change', filterDigitalEquipmentByType);
     typeFilter.dataset.bound = 'true';
   }
-  $('#digital-body').innerHTML = state.equipment.map((item) => `<tr data-equipment-id="${item.id}"><td class="selection-cell"><input type="radio" name="digital-equipment" aria-label="Sélectionner ${escapeHtml(item.Equipement)}"></td><td><strong>${escapeHtml(item.Equipement)}</strong></td><td>${escapeHtml(item.Marque) || '—'}</td><td>${escapeHtml(item.Type) || '—'}</td><td>${escapeHtml(item.quantity)}</td><td class="digital-remaining">${escapeHtml(item.available_quantity)}</td></tr>`).join('');
+  $('#digital-body').innerHTML = state.equipment.map((item) => `<tr data-equipment-id="${item.id}" data-search-key="${escapeHtml(item.Equipement)}"><td class="selection-cell"><input type="radio" name="digital-equipment" aria-label="Sélectionner ${escapeHtml(item.Equipement)}"></td><td><strong>${escapeHtml(item.Equipement)}</strong></td><td>${escapeHtml(item.Marque) || '—'}</td><td>${escapeHtml(item.Type) || '—'}</td><td>${escapeHtml(item.quantity)}</td><td class="digital-remaining">${escapeHtml(item.available_quantity)}</td></tr>`).join('');
   filterDigitalEquipmentByType();
   document.querySelectorAll('#digital-body tr').forEach((row) => {
     row.addEventListener('click', (event) => { if (!event.target.closest('input')) toggleEquipment(Number(row.dataset.equipmentId)); });
@@ -184,14 +231,19 @@ async function loadDigital() {
 }
 function filterDigitalEquipmentByType() {
   const selectedType = $('#digital-type-filter').value;
+  const search = normalizeSearchText($('#digital-body-search').value);
   let selectedEquipmentHidden = false;
+  let visibleCount = 0;
   document.querySelectorAll('#digital-body tr').forEach((row) => {
-    const matches = !selectedType || row.children[3].textContent.trim() === selectedType;
+    const matches = (!selectedType || row.children[3].textContent.trim() === selectedType)
+      && normalizeSearchText(row.dataset.searchKey).includes(search);
     row.hidden = !matches;
+    if (matches) visibleCount += 1;
     if (!matches && state.selectedEquipment.some((item) => item.id === Number(row.dataset.equipmentId))) {
       selectedEquipmentHidden = true;
     }
   });
+  $('#digital-body-no-results').hidden = visibleCount > 0;
   if (selectedEquipmentHidden) clearEquipmentSelection();
 }
 async function refreshDigitalData() {
@@ -200,7 +252,7 @@ async function refreshDigitalData() {
     fetch('/api/digital-loans', { cache: 'no-store' }),
   ]);
   if (!inventoryResponse.ok || !loansResponse.ok) throw new Error('Impossible d’actualiser le stock numérique.');
-  state.equipment = await inventoryResponse.json();
+  state.equipment = sortAlphabetically(await inventoryResponse.json(), 'Equipement');
   state.digitalLoans = await loansResponse.json();
   updatePendingReservationsButton();
   document.querySelectorAll('#digital-body tr').forEach((row) => {
@@ -218,12 +270,13 @@ async function loadEPS() {
     const detail = await failedResponse.json().catch(() => ({}));
     throw new Error(detail.detail || 'Impossible de charger l’inventaire et les pré-réservations EPS.');
   }
-  state.epsEquipment = await inventoryResponse.json();
+  state.epsEquipment = sortAlphabetically(await inventoryResponse.json(), 'Equipement');
   state.epsLoans = await loansResponse.json();
   updatePendingEpsButton();
   loadSchools();
   $('#eps-count').textContent = `${state.epsEquipment.length} équipement${state.epsEquipment.length > 1 ? 's' : ''}`;
-  $('#eps-body').innerHTML = state.epsEquipment.map((item) => `<tr data-eps-id="${item.id}"><td class="selection-cell"><input type="radio" name="eps-equipment" aria-label="Sélectionner ${escapeHtml(item.Equipement)}" ${item.quantity < 1 ? 'disabled' : ''}></td><td><strong>${escapeHtml(item.Equipement)}</strong></td><td>${escapeHtml(item.quantity)}</td><td class="eps-remaining">${escapeHtml(item.available_quantity)}</td></tr>`).join('');
+  $('#eps-body').innerHTML = state.epsEquipment.map((item) => `<tr data-eps-id="${item.id}" data-search-key="${escapeHtml(item.Equipement)}"><td class="selection-cell"><input type="radio" name="eps-equipment" aria-label="Sélectionner ${escapeHtml(item.Equipement)}" ${item.quantity < 1 ? 'disabled' : ''}></td><td><strong>${escapeHtml(item.Equipement)}</strong></td><td>${escapeHtml(item.quantity)}</td><td class="eps-remaining">${escapeHtml(item.available_quantity)}</td></tr>`).join('');
+  filterInventoryRows('eps-body-search', 'eps-body', 'eps-body-no-results');
   document.querySelectorAll('#eps-body tr').forEach((row) => {
     row.addEventListener('click', (event) => { if (!event.target.closest('input')) toggleEps(Number(row.dataset.epsId)); });
     const radio = row.querySelector('input[type="radio"]');
@@ -237,7 +290,7 @@ async function refreshEPSData() {
     fetch('/api/eps-loans', { cache: 'no-store' }),
   ]);
   if (!inventoryResponse.ok || !loansResponse.ok) throw new Error('Impossible d’actualiser le stock EPS.');
-  state.epsEquipment = await inventoryResponse.json();
+  state.epsEquipment = sortAlphabetically(await inventoryResponse.json(), 'Equipement');
   state.epsLoans = await loansResponse.json();
   updatePendingEpsButton();
   document.querySelectorAll('#eps-body tr').forEach((row) => {
@@ -258,11 +311,12 @@ async function loadScience() {
     const detail = await failedResponse.json().catch(() => ({}));
     throw new Error(detail.detail || 'Impossible de charger l’inventaire et les réservations de matériel scientifique.');
   }
-  state.scienceEquipment = await inventoryResponse.json();
+  state.scienceEquipment = sortAlphabetically(await inventoryResponse.json(), 'Equipement');
   state.scienceLoans = await loansResponse.json();
   loadSchools();
   $('#science-count').textContent = `${state.scienceEquipment.length} matériel${state.scienceEquipment.length > 1 ? 's' : ''}`;
-  $('#science-body').innerHTML = state.scienceEquipment.map((item) => `<tr data-science-id="${item.id}"><td class="selection-cell"><input type="radio" name="science-equipment" aria-label="Sélectionner ${escapeHtml(item.Equipement)}"></td><td><strong>${escapeHtml(item.Equipement)}</strong></td></tr>`).join('');
+  $('#science-body').innerHTML = state.scienceEquipment.map((item) => `<tr data-science-id="${item.id}" data-search-key="${escapeHtml(item.Equipement)}"><td class="selection-cell"><input type="radio" name="science-equipment" aria-label="Sélectionner ${escapeHtml(item.Equipement)}"></td><td><strong>${escapeHtml(item.Equipement)}</strong></td></tr>`).join('');
+  filterInventoryRows('science-body-search', 'science-body', 'science-body-no-results');
   document.querySelectorAll('#science-body tr').forEach((row) => {
     row.addEventListener('click', (event) => { if (!event.target.closest('input')) toggleScience(Number(row.dataset.scienceId)); });
     const radio = row.querySelector('input[type="radio"]');
@@ -285,7 +339,7 @@ async function loadBooks() {
     const detail = await failedResponse.json().catch(() => ({}));
     throw new Error(detail.detail || 'Impossible de charger l’inventaire et les réservations des livres et albums.');
   }
-  state.books = await booksResponse.json();
+  state.books = sortAlphabetically(await booksResponse.json(), 'Titre');
   state.bookLoans = await loansResponse.json();
   loadSchools();
   $('#series-count').textContent = `${state.books.length} série${state.books.length > 1 ? 's' : ''}`;
@@ -320,12 +374,13 @@ async function loadPedagogy() {
     throw new Error(detail.detail || 'Impossible de charger l’inventaire et les réservations des livres pédagogiques.');
   }
   const [inventory, loans] = await Promise.all([inventoryResponse.json(), loansResponse.json()]);
-  state.pedagogyBooks = inventory.books;
+  state.pedagogyBooks = sortAlphabetically(inventory.books, 'Titre');
   state.pedagogyLoans = loans;
   state.pedagogyLoaded = true;
   loadSchools();
   $('#pedagogy-count').textContent = `${state.pedagogyBooks.length} livre${state.pedagogyBooks.length > 1 ? 's' : ''}`;
-  $('#pedagogy-body').innerHTML = state.pedagogyBooks.map((book) => `<tr data-pedagogy-id="${book.id}"><td class="selection-cell"><input type="radio" name="pedagogy-book" aria-label="Sélectionner ${escapeHtml(book.Titre)}"></td><td><strong>${escapeHtml(book.Titre)}</strong></td><td>${escapeHtml(book.Auteur) || '—'}</td><td>${escapeHtml(book.Edition) || '—'}</td></tr>`).join('');
+  $('#pedagogy-body').innerHTML = state.pedagogyBooks.map((book) => `<tr data-pedagogy-id="${book.id}" data-search-key="${escapeHtml(book.Titre)}"><td class="selection-cell"><input type="radio" name="pedagogy-book" aria-label="Sélectionner ${escapeHtml(book.Titre)}"></td><td><strong>${escapeHtml(book.Titre)}</strong></td><td>${escapeHtml(book.Auteur) || '—'}</td><td>${escapeHtml(book.Edition) || '—'}</td></tr>`).join('');
+  filterInventoryRows('pedagogy-body-search', 'pedagogy-body', 'pedagogy-body-no-results');
   updatePendingPedagogyButton();
   document.querySelectorAll('#pedagogy-body tr').forEach((row) => {
     row.addEventListener('click', (event) => { if (!event.target.closest('input')) togglePedagogy(Number(row.dataset.pedagogyId)); });
@@ -362,7 +417,7 @@ async function refreshBookData() {
     fetch('/api/book-loans', { cache: 'no-store' }),
   ]);
   if (!booksResponse.ok || !loansResponse.ok) throw new Error('Impossible d’actualiser le stock des séries.');
-  state.books = await booksResponse.json();
+  state.books = sortAlphabetically(await booksResponse.json(), 'Titre');
   state.bookLoans = await loansResponse.json();
   state.selectedBooks = state.books
     .filter((book) => selectedQuantities.has(book.id))
