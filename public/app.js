@@ -806,7 +806,7 @@ function scienceAvailabilityForDate(equipment, date) {
   const active = state.scienceLoans.filter((loan) => loan.is_active
     && loan.equipment_id === equipment.id
     && loan.loan_date <= date && date <= (loan.occupied_until || loan.return_date));
-  const total = Math.max(0, Number(equipment.quantity) || 0);
+  const total = 1;
   const reserved = active.reduce((sum, loan) => sum + loan.quantity, 0);
   return Math.max(0, total - reserved);
 }
