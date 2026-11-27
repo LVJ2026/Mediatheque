@@ -3,6 +3,7 @@ import { bookLoansTable, loansTable, syncCurrentBookAvailability } from '../../_
 import { digitalInventoryTable, digitalLoansTable, syncDigitalAvailability } from '../../_digital.js';
 import { epsLoansTable } from '../../_eps.js';
 import { pedagogyLoansTable } from '../../_pedagogy.js';
+import { scienceLoansTable } from '../../_science.js';
 import { sendMail } from '../../_mail.js';
 import { isManager, unauthorized } from '../../_manager.js';
 
@@ -25,7 +26,8 @@ export async function onRequestPost({ request, env, waitUntil }) {
     const isDigital = input.collection === 'digital';
     const isEps = input.collection === 'eps';
     const isPedagogy = input.collection === 'pedagogy';
-    const table = isBooks ? bookLoansTable(env) : isDigital ? digitalLoansTable(env) : isEps ? epsLoansTable(env) : isPedagogy ? pedagogyLoansTable(env) : loansTable(env);
+    const isScience = input.collection === 'science';
+    const table = isBooks ? bookLoansTable(env) : isDigital ? digitalLoansTable(env) : isEps ? epsLoansTable(env) : isPedagogy ? pedagogyLoansTable(env) : isScience ? scienceLoansTable(env) : loansTable(env);
     const ids = new Set(input.loan_ids.map(Number));
     const payload = await gristRequest(env, table);
     const loans = (payload.records || []).filter((record) => ids.has(Number(record.id)));

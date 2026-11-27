@@ -1,4 +1,4 @@
-const state = { games: [], loans: [], selectedGames: [], books: [], bookLoans: [], selectedBooks: [], pedagogyBooks: [], pedagogyLoans: [], selectedPedagogy: [], pedagogyLoaded: false, pedagogyLoading: false, equipment: [], digitalLoans: [], selectedEquipment: [], epsEquipment: [], epsLoans: [], selectedEps: [], collection: 'games', month: new Date(), manager: false };
+const state = { games: [], loans: [], selectedGames: [], books: [], bookLoans: [], selectedBooks: [], pedagogyBooks: [], pedagogyLoans: [], selectedPedagogy: [], pedagogyLoaded: false, pedagogyLoading: false, scienceEquipment: [], scienceLoans: [], selectedScience: [], equipment: [], digitalLoans: [], selectedEquipment: [], epsEquipment: [], epsLoans: [], selectedEps: [], collection: 'games', month: new Date(), manager: false };
 let loansRefreshInFlight = false;
 const $ = (selector) => document.querySelector(selector);
 const iso = (date) => { const local = new Date(date); local.setMinutes(local.getMinutes() - local.getTimezoneOffset()); return local.toISOString().slice(0, 10); };
@@ -8,6 +8,13 @@ const normalizeSearchText = (value) => String(value ?? '').normalize('NFD').repl
 const pedagogyCard = document.querySelector('.collection-books');
 pedagogyCard.href = '#pedagogie';
 pedagogyCard.querySelector('b').insertAdjacentHTML('beforebegin', '<small class="collection-note">Pré-réservation soumise à validation des gestionnaires</small>');
+document.querySelector('.collection-science').href = '#sciences';
+document.querySelector('.collection-science strong').insertAdjacentHTML('beforebegin', '<small class="collection-note">Un seul matériel par réservation</small>');
+const scienceAvailability = document.createElement('div');
+scienceAvailability.id = 'science-availability';
+scienceAvailability.className = 'book-quantity-fields';
+scienceAvailability.hidden = true;
+$('#loan-form').querySelector('.primary-button').before(scienceAvailability);
 
 async function loadGames() {
   const [gamesResponse, loansResponse] = await Promise.all([fetch('/api/games'), fetch('/api/loans')]);
@@ -241,6 +248,33 @@ async function refreshEPSData() {
     }
   });
 }
+async function loadScience() {
+  const [inventoryResponse, loansResponse] = await Promise.all([
+    fetch('/api/science-equipment', { cache: 'no-store' }),
+    fetch('/api/science-loans', { cache: 'no-store' }),
+  ]);
+  if (!inventoryResponse.ok || !loansResponse.ok) {
+    const failedResponse = !loansResponse.ok ? loansResponse : inventoryResponse;
+    const detail = await failedResponse.json().catch(() => ({}));
+    throw new Error(detail.detail || 'Impossible de charger l’inventaire et les réservations de matériel scientifique.');
+  }
+  state.scienceEquipment = await inventoryResponse.json();
+  state.scienceLoans = await loansResponse.json();
+  loadSchools();
+  $('#science-count').textContent = `${state.scienceEquipment.length} matériel${state.scienceEquipment.length > 1 ? 's' : ''}`;
+  $('#science-body').innerHTML = state.scienceEquipment.map((item) => `<tr data-science-id="${item.id}"><td class="selection-cell"><input type="radio" name="science-equipment" aria-label="Sélectionner ${escapeHtml(item.Equipement)}" ${item.quantity < 1 ? 'disabled' : ''}></td><td><strong>${escapeHtml(item.Equipement)}</strong></td></tr>`).join('');
+  document.querySelectorAll('#science-body tr').forEach((row) => {
+    row.addEventListener('click', (event) => { if (!event.target.closest('input')) toggleScience(Number(row.dataset.scienceId)); });
+    const radio = row.querySelector('input[type="radio"]');
+    radio.addEventListener('click', (event) => event.stopPropagation());
+    radio.addEventListener('change', () => toggleScience(Number(row.dataset.scienceId)));
+  });
+}
+async function refreshScienceData() {
+  const response = await fetch('/api/science-loans', { cache: 'no-store' });
+  if (!response.ok) throw new Error('Impossible d’actualiser les réservations de matériel scientifique.');
+  state.scienceLoans = await response.json();
+}
 async function loadBooks() {
   const [booksResponse, loansResponse] = await Promise.all([
     fetch('/api/books', { cache: 'no-store' }),
@@ -347,7 +381,7 @@ async function refreshBookData() {
   });
 }
 async function refreshLoans() {
-  if ((!state.games.length && !state.books.length && !state.pedagogyBooks.length && !state.equipment.length && !state.epsEquipment.length) || loansRefreshInFlight) return;
+  if ((!state.games.length && !state.books.length && !state.pedagogyBooks.length && !state.scienceEquipment.length && !state.equipment.length && !state.epsEquipment.length) || loansRefreshInFlight) return;
   loansRefreshInFlight = true;
   try {
     if (state.equipment.length) {
@@ -357,6 +391,10 @@ async function refreshLoans() {
     if (state.epsEquipment.length) {
       await refreshEPSData();
       if (state.selectedEps.length) renderEPSCalendar();
+    }
+    if (state.scienceEquipment.length) {
+      await refreshScienceData();
+      if (state.selectedScience.length) renderScienceCalendar();
     }
     const response = await fetch('/api/loans', { cache: 'no-store' });
     if (response.ok) state.loans = await response.json();
@@ -504,6 +542,25 @@ function toggleEps(id) {
     renderEPSCalendar();
   }
 }
+function toggleScience(id) {
+  const equipment = state.scienceEquipment.find((item) => item.id === id);
+  if (!equipment || equipment.quantity < 1) return;
+  state.selectedScience = [equipment];
+  const today = iso(new Date());
+  const nextBooking = state.scienceLoans
+    .filter((loan) => loan.is_active && loan.equipment_id === id && loan.return_date >= today)
+    .sort((first, second) => first.loan_date.localeCompare(second.loan_date))[0];
+  state.month = nextBooking ? new Date(`${nextBooking.loan_date}T12:00:00`) : new Date();
+  document.querySelectorAll('#science-body tr').forEach((row) => {
+    const selected = state.selectedScience.some((item) => item.id === Number(row.dataset.scienceId));
+    row.classList.toggle('selected', selected);
+    row.querySelector('input[type="radio"]').checked = selected;
+  });
+  $('#science-empty-calendar').hidden = true;
+  $('#science-calendar-content').hidden = false;
+  $('#science-selected').textContent = equipment.Equipement;
+  renderScienceCalendar();
+}
 function clearGameSelection() {
   state.selectedGames = [];
   document.querySelectorAll('#games-body tr').forEach((row) => {
@@ -530,6 +587,15 @@ function clearPedagogySelection() {
   });
   $('#pedagogy-empty-calendar').hidden = false;
   $('#pedagogy-calendar-content').hidden = true;
+}
+function clearScienceSelection() {
+  state.selectedScience = [];
+  document.querySelectorAll('#science-body tr').forEach((row) => {
+    row.classList.remove('selected');
+    row.querySelector('input[type="radio"]').checked = false;
+  });
+  $('#science-empty-calendar').hidden = false;
+  $('#science-calendar-content').hidden = true;
 }
 function clearEquipmentSelection() {
   state.selectedEquipment = [];
@@ -574,7 +640,7 @@ function bookAvailabilityForDate(book, date) {
 function digitalAvailabilityForDate(equipment, date) {
   const bookings = state.digitalLoans.filter((loan) => loan.equipment_id === equipment.id
     && loan.loan_date <= date && date <= (loan.occupied_until || loan.return_date));
-  const total = Math.max(0, Number(equipment.quantity) || 0);
+  const total = 1;
   const approvedQuantity = bookings
     .filter((loan) => loan.is_approved)
     .reduce((sum, loan) => sum + loan.quantity, 0);
@@ -681,6 +747,50 @@ function renderEPSCalendar() {
     else if (button.dataset.date >= today) openModal(button.dataset.date);
   }));
 }
+function scienceAvailabilityForDate(equipment, date) {
+  const active = state.scienceLoans.filter((loan) => loan.is_active
+    && loan.equipment_id === equipment.id
+    && loan.loan_date <= date && date <= (loan.occupied_until || loan.return_date));
+  const total = Math.max(0, Number(equipment.quantity) || 0);
+  const reserved = active.reduce((sum, loan) => sum + loan.quantity, 0);
+  return Math.max(0, total - reserved);
+}
+function scienceAvailabilityForPeriod(equipment, startDate, endDate) {
+  const bookings = state.scienceLoans.filter((loan) => loan.is_active
+    && loan.equipment_id === equipment.id
+    && loan.loan_date <= endDate && (loan.occupied_until || loan.return_date) >= startDate);
+  const changeDates = new Set([startDate]);
+  for (const loan of bookings) {
+    if (loan.loan_date > startDate && loan.loan_date <= endDate) changeDates.add(loan.loan_date);
+    const nextAvailable = iso(new Date(new Date(`${loan.occupied_until || loan.return_date}T12:00:00`).getTime() + 86400000));
+    if (nextAvailable > startDate && nextAvailable <= endDate) changeDates.add(nextAvailable);
+  }
+  return Math.min(...[...changeDates].map((date) => scienceAvailabilityForDate(equipment, date)));
+}
+function renderScienceCalendar() {
+  if (!state.selectedScience.length) return;
+  const year = state.month.getFullYear();
+  const month = state.month.getMonth();
+  const equipment = state.selectedScience[0];
+  $('#science-calendar-month').textContent = new Intl.DateTimeFormat('fr-FR', { month: 'long', year: 'numeric' }).format(state.month);
+  const firstDay = (new Date(year, month, 1).getDay() + 6) % 7;
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const today = iso(new Date());
+  let html = '';
+  for (let index = 0; index < firstDay; index += 1) html += '<button class="day empty" tabindex="-1" aria-hidden="true"></button>';
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    const date = iso(new Date(year, month, day));
+    const available = scienceAvailabilityForDate(equipment, date) > 0;
+    const classes = ['day', available ? 'science-available' : 'science-occupied', date < today ? 'past' : '', date === today ? 'today' : ''].filter(Boolean).join(' ');
+    const disabled = date < today || (!available && !state.manager);
+    html += `<button class="${classes}" data-date="${date}" ${disabled ? 'disabled' : ''}>${day}</button>`;
+  }
+  $('#science-calendar-grid').innerHTML = html;
+  document.querySelectorAll('#science-calendar-grid .day:not(.empty)').forEach((button) => button.addEventListener('click', () => {
+    if (scienceAvailabilityForDate(equipment, button.dataset.date) < 1 && state.manager) openManageModal(button.dataset.date);
+    else if (button.dataset.date >= today) openModal(button.dataset.date);
+  }));
+}
 function seriesAvailability() {
   const days = new Map();
   const year = state.month.getFullYear();
@@ -699,8 +809,8 @@ function seriesAvailability() {
   }
   return days;
 }
-function allBookings(collection = state.collection) { const source = collection === 'books' ? state.bookLoans : collection === 'pedagogy' ? state.pedagogyLoans : collection === 'digital' ? state.digitalLoans : collection === 'eps' ? state.epsLoans : state.loans; const grouped = new Map(); source.forEach((loan) => { const key = [loan.name, loan.first_name, loan.professional_email, loan.school, loan.loan_date, loan.return_date, collection, collection === 'pedagogy' ? loan.book_id : ''].join('\u001f'); if (!grouped.has(key)) grouped.set(key, { ...loan, collection, ids: [], entries: [] }); const booking = grouped.get(key); booking.confirmation_sent ||= loan.confirmation_sent; booking.ids.push(loan.id); booking.entries.push(loan); }); return [...grouped.values()]; }
-function loansForDate(date) { return allBookings().filter((booking) => booking.entries.some((loan) => { const selected = state.collection === 'books' ? state.selectedBooks.some((book) => sameBook(loan, book)) : state.collection === 'pedagogy' ? state.selectedPedagogy.some((book) => book.id === loan.book_id) : state.collection === 'digital' ? state.selectedEquipment.some((equipment) => equipment.id === loan.equipment_id) : state.collection === 'eps' ? state.selectedEps.some((equipment) => equipment.id === loan.equipment_id) : state.selectedGames.some((game) => game.id === loan.game_id); return selected && loan.loan_date <= date && date <= (loan.occupied_until || loan.return_date); })); }
+function allBookings(collection = state.collection) { const source = collection === 'books' ? state.bookLoans : collection === 'pedagogy' ? state.pedagogyLoans : collection === 'science' ? state.scienceLoans : collection === 'digital' ? state.digitalLoans : collection === 'eps' ? state.epsLoans : state.loans; const grouped = new Map(); source.forEach((loan) => { const key = [loan.name, loan.first_name, loan.professional_email, loan.school, loan.loan_date, loan.return_date, collection, collection === 'pedagogy' ? loan.book_id : collection === 'science' ? loan.equipment_id : ''].join('\u001f'); if (!grouped.has(key)) grouped.set(key, { ...loan, collection, ids: [], entries: [] }); const booking = grouped.get(key); booking.confirmation_sent ||= loan.confirmation_sent; booking.ids.push(loan.id); booking.entries.push(loan); }); return [...grouped.values()]; }
+function loansForDate(date) { return allBookings().filter((booking) => booking.entries.some((loan) => { const selected = state.collection === 'books' ? state.selectedBooks.some((book) => sameBook(loan, book)) : state.collection === 'pedagogy' ? state.selectedPedagogy.some((book) => book.id === loan.book_id) : state.collection === 'science' ? state.selectedScience.some((item) => item.id === loan.equipment_id) : state.collection === 'digital' ? state.selectedEquipment.some((equipment) => equipment.id === loan.equipment_id) : state.collection === 'eps' ? state.selectedEps.some((equipment) => equipment.id === loan.equipment_id) : state.selectedGames.some((game) => game.id === loan.game_id); return selected && loan.loan_date <= date && date <= (loan.occupied_until || loan.return_date); })); }
 function renderCalendar() { const year = state.month.getFullYear(); const month = state.month.getMonth(); $('#calendar-month').textContent = new Intl.DateTimeFormat('fr-FR', { month: 'long', year: 'numeric' }).format(state.month); const firstDay = (new Date(year, month, 1).getDay() + 6) % 7; const daysInMonth = new Date(year, month + 1, 0).getDate(); const today = iso(new Date()); const busy = occupiedDates(); let html = ''; for (let index = 0; index < firstDay; index += 1) html += '<button class="day empty" tabindex="-1" aria-hidden="true"></button>'; for (let day = 1; day <= daysInMonth; day += 1) { const date = iso(new Date(year, month, day)); const occupied = busy.has(date); const unavailable = occupied || date < today; const classes = ['day', occupied ? 'occupied' : '', date < today ? 'past' : '', date === today ? 'today' : ''].filter(Boolean).join(' '); const disabled = unavailable && !state.manager; html += `<button class="${classes}" data-date="${date}" ${disabled ? 'disabled' : ''}>${day}</button>`; } $('#calendar-grid').innerHTML = html; document.querySelectorAll('#calendar-grid .day:not(.empty)').forEach((button) => button.addEventListener('click', () => { if (button.classList.contains('occupied')) openManageModal(button.dataset.date); else openModal(button.dataset.date); })); }
 function renderSeriesCalendar() {
   const year = state.month.getFullYear();
@@ -877,6 +987,19 @@ function renderPedagogyAvailability(startDate, endDate) {
     ? '<p class="form-error">Ce livre est déjà réservé sur cette période. Choisissez d’autres dates.</p>'
     : `<p class="modal-note">${escapeHtml(book?.Titre || 'Livre pédagogique')} est disponible sur cette période. Cette demande devra être validée par un gestionnaire.</p>`;
 }
+function renderScienceAvailability(startDate, endDate) {
+  const container = $('#science-availability');
+  const isScience = state.collection === 'science';
+  container.hidden = !isScience;
+  if (!isScience) return;
+  const submitButton = $('#loan-form').querySelector('button[type="submit"]');
+  const equipment = state.selectedScience[0];
+  const available = equipment ? scienceAvailabilityForPeriod(equipment, startDate, endDate) : 0;
+  submitButton.disabled = !equipment || available < 1;
+  container.innerHTML = available < 1
+    ? '<p class="form-error">Ce matériel est déjà emprunté sur cette période. Choisissez d’autres dates.</p>'
+    : `<p class="modal-note">${escapeHtml(equipment.Equipement)} est disponible sur cette période.</p>`;
+}
 function openModal(date) {
   const form = $('#loan-form');
   const startInput = $('#loan-start-date');
@@ -885,6 +1008,8 @@ function openModal(date) {
     ? state.selectedBooks.map((item) => `${item.Titre} × ${item.requested_quantity}`).join(' + ')
     : state.collection === 'pedagogy'
       ? state.selectedPedagogy.map((item) => item.Titre).join(' + ')
+    : state.collection === 'science'
+      ? state.selectedScience.map((item) => item.Equipement).join(' + ')
     : state.collection === 'digital'
       ? state.selectedEquipment.map((item) => `${item.Equipement} × ${item.requested_quantity}`).join(' + ')
       : state.collection === 'eps'
@@ -895,6 +1020,7 @@ function openModal(date) {
   form.dataset.pedagogySelection = JSON.stringify(state.selectedPedagogy.map((item) => item.id));
   form.dataset.digitalSelection = JSON.stringify(state.selectedEquipment.map((item) => ({ id: item.id, quantity: item.requested_quantity })));
   form.dataset.epsSelection = JSON.stringify(state.selectedEps.map((item) => ({ id: item.id, quantity: item.requested_quantity })));
+  form.dataset.scienceSelection = JSON.stringify(state.selectedScience.map((item) => item.id));
   form.dataset.collection = state.collection;
   form.reset();
   $('#loan-modal-eyebrow').textContent = state.collection === 'digital' || state.collection === 'eps' || state.collection === 'pedagogy'
@@ -916,6 +1042,7 @@ function openModal(date) {
     $('#modal-date').textContent = `Du ${formatDate(startInput.value)} au ${formatDate(endInput.value)}`;
     renderBookQuantityFields(startInput.value, endInput.value);
     renderPedagogyAvailability(startInput.value, endInput.value);
+    renderScienceAvailability(startInput.value, endInput.value);
     renderDigitalQuantityFields(startInput.value, endInput.value);
     renderEpsQuantityFields(startInput.value, endInput.value);
   };
@@ -937,16 +1064,20 @@ async function submitLoan(event) {
   const pedagogySelection = JSON.parse(form.dataset.pedagogySelection || '[]');
   const digitalSelection = JSON.parse(form.dataset.digitalSelection || '[]');
   const epsSelection = JSON.parse(form.dataset.epsSelection || '[]');
+  const scienceSelection = JSON.parse(form.dataset.scienceSelection || '[]');
   const isBooks = form.dataset.collection === 'books';
   const isPedagogy = form.dataset.collection === 'pedagogy';
   const isDigital = form.dataset.collection === 'digital';
   const isEPS = form.dataset.collection === 'eps';
+  const isScience = form.dataset.collection === 'science';
   const loanDate = data.loan_date;
   const endDate = data.end_date;
   const summary = isBooks
     ? bookSelection.map((item) => `${state.books.find((book) => book.id === item.id)?.Titre || 'Série'} × ${item.quantity}`).join(', ')
     : isPedagogy
       ? state.pedagogyBooks.find((book) => book.id === pedagogySelection[0])?.Titre || 'Livre pédagogique'
+    : isScience
+      ? state.scienceEquipment.find((item) => item.id === scienceSelection[0])?.Equipement || 'Matériel scientifique'
     : isDigital
       ? digitalSelection.map((item) => `${state.equipment.find((equipment) => equipment.id === item.id)?.Equipement || 'Équipement'} × ${item.quantity}`).join(', ')
       : isEPS
@@ -955,13 +1086,13 @@ async function submitLoan(event) {
   const bookingType = isDigital || isEPS || isPedagogy ? 'la pré-réservation' : 'la réservation';
   if (!confirm(`Confirmer ${bookingType} de ${summary} du ${formatDate(loanDate)} au ${formatDate(endDate)} ?`)) return;
   const printWindow = window.open('', '_blank');
-  const endpoint = isBooks ? '/api/book-loans/batch' : isPedagogy ? '/api/pedagogy-loans/batch' : isDigital ? '/api/digital-loans/batch' : isEPS ? '/api/eps-loans/batch' : '/api/loans/batch';
-  const payload = isBooks ? { ...data, books: bookSelection } : isPedagogy ? { ...data, book_id: pedagogySelection[0] } : isDigital ? { ...data, equipment: digitalSelection } : isEPS ? { ...data, equipment: epsSelection } : { ...data, game_ids: gameIds };
+  const endpoint = isBooks ? '/api/book-loans/batch' : isPedagogy ? '/api/pedagogy-loans/batch' : isScience ? '/api/science-loans/batch' : isDigital ? '/api/digital-loans/batch' : isEPS ? '/api/eps-loans/batch' : '/api/loans/batch';
+  const payload = isBooks ? { ...data, books: bookSelection } : isPedagogy ? { ...data, book_id: pedagogySelection[0] } : isScience ? { ...data, equipment: [{ id: scienceSelection[0], quantity: 1 }] } : isDigital ? { ...data, equipment: digitalSelection } : isEPS ? { ...data, equipment: epsSelection } : { ...data, game_ids: gameIds };
   const response = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
   const result = await response.json();
   if (!response.ok) {
     printWindow?.close();
-    if ((isDigital || isEPS || isPedagogy) && response.status === 409) {
+    if ((isDigital || isEPS || isPedagogy || isScience) && response.status === 409) {
       alert(result.detail);
     }
     $('#form-error').textContent = result.detail || 'La réservation n’a pas pu être enregistrée.';
@@ -972,6 +1103,8 @@ async function submitLoan(event) {
     ? bookSelection.map((item) => `${state.books.find((book) => book.id === item.id)?.Titre || 'Série'} × ${item.quantity}`)
     : isPedagogy
       ? [state.pedagogyBooks.find((book) => book.id === pedagogySelection[0])?.Titre || 'Livre pédagogique']
+    : isScience
+      ? [state.scienceEquipment.find((item) => item.id === scienceSelection[0])?.Equipement || 'Matériel scientifique']
     : isDigital
       ? digitalSelection.map((item) => `${state.equipment.find((equipment) => equipment.id === item.id)?.Equipement || 'Équipement'} × ${item.quantity}`)
       : isEPS
@@ -991,6 +1124,12 @@ async function submitLoan(event) {
     renderPedagogyCalendar();
     clearPedagogySelection();
     refreshPedagogyData().catch((error) => console.error('Actualisation des livres pédagogiques après pré-réservation impossible :', error));
+  } else if (isScience) {
+    state.scienceLoans.push(...result);
+    closeModal();
+    renderScienceCalendar();
+    clearScienceSelection();
+    refreshScienceData().catch((error) => console.error('Actualisation des réservations scientifiques impossible :', error));
   } else if (isDigital) {
     state.digitalLoans.push(...result);
     closeModal();
@@ -1082,6 +1221,53 @@ function pendingEpsBookings() {
 function activeEpsBookings() {
   return allBookings('eps').filter((booking) => booking.is_active)
     .sort((first, second) => first.return_date.localeCompare(second.return_date));
+}
+function activeScienceBookings() {
+  return allBookings('science').filter((booking) => booking.is_active)
+    .sort((first, second) => first.return_date.localeCompare(second.return_date));
+}
+function openScienceBooking(booking) {
+  const modal = $('#science-reservations-modal');
+  if (modal) modal.hidden = true;
+  state.collection = 'science';
+  const equipment = state.scienceEquipment.find((item) => item.id === booking.equipment_id);
+  state.selectedScience = equipment ? [equipment] : [];
+  const today = iso(new Date());
+  const date = today < booking.loan_date ? booking.loan_date : today;
+  state.month = new Date(`${date}T12:00:00`);
+  if (location.hash !== '#sciences') location.hash = '#sciences';
+  route();
+  document.querySelectorAll('#science-body tr').forEach((row) => {
+    const selected = state.selectedScience.some((item) => item.id === Number(row.dataset.scienceId));
+    row.classList.toggle('selected', selected);
+    row.querySelector('input[type="radio"]').checked = selected;
+  });
+  $('#science-empty-calendar').hidden = !state.selectedScience.length;
+  $('#science-calendar-content').hidden = !state.selectedScience.length;
+  if (equipment) $('#science-selected').textContent = equipment.Equipement;
+  renderScienceCalendar();
+  openManageModal(date, booking.id);
+}
+async function showScienceReservations() {
+  const modal = ensureEpsManagerModal('science-reservations-modal', 'Réservations Sciences', 'close-science-reservations');
+  const list = modal.querySelector('#science-reservations-modal-list');
+  list.innerHTML = '<p class="modal-note">Chargement des réservations…</p>';
+  modal.hidden = false;
+  try {
+    if (!state.scienceEquipment.length) await loadScience();
+    await refreshScienceData();
+    const bookings = activeScienceBookings();
+    if (!bookings.length) list.innerHTML = '<p class="modal-note">Aucune réservation de matériel scientifique en cours.</p>';
+    else {
+      list.innerHTML = `<div class="table-wrap"><table class="digital-loans-table"><thead><tr><th>Matériel</th><th>Emprunté par</th><th>Du… au…</th></tr></thead><tbody>${bookings.map((booking, index) => `<tr><td><button class="digital-loan-open" data-science-booking="${index}" type="button">${escapeHtml(booking.equipment_name)}</button></td><td>${escapeHtml(booking.first_name)} ${escapeHtml(booking.name)}</td><td>Du ${formatDate(booking.loan_date)} au ${formatDate(booking.return_date)}</td></tr>`).join('')}</tbody></table></div>`;
+      list.querySelectorAll('[data-science-booking]').forEach((button) => button.addEventListener('click', () => {
+        const booking = bookings[Number(button.dataset.scienceBooking)];
+        if (booking) openScienceBooking(booking);
+      }));
+    }
+  } catch (error) {
+    list.innerHTML = `<p class="form-error">${escapeHtml(error.message)}</p>`;
+  }
 }
 function pendingPedagogyBookings() {
   return allBookings('pedagogy').filter((booking) => !booking.is_approved && booking.is_active)
@@ -1354,7 +1540,7 @@ function syncManagerButtons() {
     dashboard.id = 'manager-dashboard';
     dashboard.className = 'manager-dashboard';
     dashboard.setAttribute('aria-label', 'Actions de gestionnaire');
-    dashboard.innerHTML = '<p class="eyebrow">Espace gestionnaire</p><div class="manager-dashboard-grid"><button id="digital-loans-button" class="manager-button" type="button">Emprunts numériques</button><button id="pending-reservations-button" class="manager-button pending-reservations-button" type="button"></button><button id="eps-loans-button" class="manager-button" type="button">Emprunts EPS</button><button id="eps-pending-button" class="manager-button pending-reservations-button" type="button"></button><button id="pedagogy-loans-button" class="manager-button" type="button">Emprunts livres pédagogiques</button><button id="pedagogy-pending-button" class="manager-button pending-reservations-button" type="button"></button><button id="manager-bookings-button" class="manager-button" type="button">Réservations jeux et livres</button></div>';
+    dashboard.innerHTML = '<p class="eyebrow">Espace gestionnaire</p><div class="manager-dashboard-grid"><button id="digital-loans-button" class="manager-button" type="button">Emprunts numériques</button><button id="pending-reservations-button" class="manager-button pending-reservations-button" type="button"></button><button id="eps-loans-button" class="manager-button" type="button">Emprunts EPS</button><button id="eps-pending-button" class="manager-button pending-reservations-button" type="button"></button><button id="pedagogy-loans-button" class="manager-button" type="button">Emprunts livres pédagogiques</button><button id="pedagogy-pending-button" class="manager-button pending-reservations-button" type="button"></button><button id="science-reservations-button" class="manager-button" type="button">Réservations Sciences</button><button id="manager-bookings-button" class="manager-button" type="button">Réservations jeux et livres</button></div>';
     $('#home-view').querySelector('.hero').after(dashboard);
     $('#digital-loans-button').addEventListener('click', showDigitalLoans);
     $('#pending-reservations-button').addEventListener('click', showPendingReservations);
@@ -1362,6 +1548,7 @@ function syncManagerButtons() {
     $('#eps-pending-button').addEventListener('click', showPendingEpsReservations);
     $('#pedagogy-loans-button').addEventListener('click', showPedagogyLoans);
     $('#pedagogy-pending-button').addEventListener('click', showPendingPedagogyReservations);
+    $('#science-reservations-button').addEventListener('click', showScienceReservations);
     $('#manager-bookings-button').addEventListener('click', showManagerBookings);
   }
   dashboard.hidden = !state.manager;
@@ -1390,10 +1577,12 @@ async function logoutManager() {
   $('#digital-view').hidden = true;
   $('#eps-view').hidden = true;
   $('#pedagogy-view').hidden = true;
+  $('#science-view').hidden = true;
   if (location.hash !== '#home') location.hash = '#home';
   try { clearGameSelection(); } catch (error) { console.error('Nettoyage de la sélection des jeux impossible :', error); }
   try { clearBookSelection(); } catch (error) { console.error('Nettoyage de la sélection des séries impossible :', error); }
   try { clearPedagogySelection(); } catch (error) { console.error('Nettoyage de la sélection des livres pédagogiques impossible :', error); }
+  try { clearScienceSelection(); } catch (error) { console.error('Nettoyage de la sélection Sciences impossible :', error); }
   try { clearEquipmentSelection(); } catch (error) { console.error('Nettoyage de la sélection numérique impossible :', error); }
   try { clearEpsSelection(); } catch (error) { console.error('Nettoyage de la sélection EPS impossible :', error); }
   closeManageModal();
@@ -1402,6 +1591,8 @@ async function logoutManager() {
   if (pendingModal) pendingModal.hidden = true;
   const epsPendingModal = $('#eps-pending-modal');
   if (epsPendingModal) epsPendingModal.hidden = true;
+  const scienceReservationsModal = $('#science-reservations-modal');
+  if (scienceReservationsModal) scienceReservationsModal.hidden = true;
   for (const id of ['pedagogy-loans-modal', 'pedagogy-pending-modal']) {
     const pedagogyModal = $(`#${id}`);
     if (pedagogyModal) pedagogyModal.hidden = true;
@@ -1422,6 +1613,8 @@ function bookingResources(booking) {
     ? `${state.books.find((item) => item.id === loan.book_id)?.Titre || 'Série'} × ${loan.quantity}`
     : booking.collection === 'pedagogy'
       ? loan.book_title || 'Livre pédagogique'
+    : booking.collection === 'science'
+      ? loan.equipment_name || 'Matériel scientifique'
     : booking.collection === 'digital'
       ? `${state.equipment.find((item) => item.id === loan.equipment_id)?.Equipement || loan.equipment_name || 'Équipement'} × ${loan.quantity}`
       : booking.collection === 'eps'
@@ -1439,17 +1632,18 @@ function openManageModal(date, bookingId) {
   $('#manage-date').textContent = formatDate(date);
   $('#manage-list').innerHTML = bookings.map((booking) => {
     const resources = bookingResources(booking);
-    const isEquipment = booking.collection === 'digital' || booking.collection === 'eps' || booking.collection === 'pedagogy';
-    const status = isEquipment ? booking.is_approved ? ' · Validée' : ' · En attente de validation' : '';
-    const approvalControl = state.manager && isEquipment
+    const requiresApproval = booking.collection === 'digital' || booking.collection === 'eps' || booking.collection === 'pedagogy';
+    const canRemind = requiresApproval || booking.collection === 'science';
+    const status = requiresApproval ? booking.is_approved ? ' · Validée' : ' · En attente de validation' : '';
+    const approvalControl = state.manager && requiresApproval
       ? `<label class="manager-approval"><input type="checkbox" data-approve-id="${booking.id}" ${booking.is_approved ? 'checked' : ''} ${booking.is_approved && booking.confirmation_sent ? 'disabled' : ''} ${booking.is_approved && !booking.confirmation_sent ? 'title="Cliquer pour réessayer l’envoi du courriel"' : ''}> Validée</label>`
       : '';
-    const reminderAction = isEquipment
+    const reminderAction = canRemind
       && booking.entries.every((loan) => loan.is_active)
       && booking.return_date <= iso(new Date())
       ? `<button class="secondary-button" data-reminder-id="${booking.id}" type="button">Envoyer un rappel</button>`
       : '';
-    const returnAction = isEquipment && !booking.is_approved
+    const returnAction = requiresApproval && !booking.is_approved
       ? ''
       : `<button class="secondary-button" data-return-id="${booking.id}" data-return-date="${date}" type="button">Enregistrer le retour à cette date</button>`;
     const managerActions = state.manager
@@ -1518,7 +1712,9 @@ async function sendDigitalReminder(id, control) {
   if (!booking) return;
   control.disabled = true;
   try {
-    const reminderEndpoint = booking.collection === 'pedagogy'
+    const reminderEndpoint = booking.collection === 'science'
+      ? '/api/science-loans/reminder'
+      : booking.collection === 'pedagogy'
       ? '/api/pedagogy-loans/reminder'
       : booking.collection === 'eps' ? '/api/eps-loans/reminder' : '/api/digital-loans/reminder';
     const response = await fetch(reminderEndpoint, {
@@ -1559,6 +1755,7 @@ async function returnLoan(id, date) {
     : loan);
   if (booking.collection === 'books') state.bookLoans = updated;
   else if (booking.collection === 'pedagogy') state.pedagogyLoans = updated;
+  else if (booking.collection === 'science') state.scienceLoans = updated;
   else if (booking.collection === 'digital') state.digitalLoans = updated;
   else if (booking.collection === 'eps') state.epsLoans = updated;
   else state.loans = updated;
@@ -1566,12 +1763,14 @@ async function returnLoan(id, date) {
   closeManageModal();
   if (booking.collection === 'books') renderSeriesCalendar();
   else if (booking.collection === 'pedagogy') renderPedagogyCalendar();
+  else if (booking.collection === 'science') renderScienceCalendar();
   else if (booking.collection === 'digital') renderDigitalCalendar();
   else if (booking.collection === 'eps') renderEPSCalendar();
   else renderCalendar();
   if (printWindow) printSheet('Fiche de retour', booking, resources, booking.loan_date, date, printWindow);
   if (booking.collection === 'digital') refreshDigitalData().catch((error) => console.error('Actualisation du stock numérique après retour impossible :', error));
   if (booking.collection === 'eps') refreshEPSData().catch((error) => console.error('Actualisation du stock EPS après retour impossible :', error));
+  if (booking.collection === 'science') refreshScienceData().catch((error) => console.error('Actualisation des réservations Sciences après retour impossible :', error));
   showToast(`Retour enregistré dans Grist.${printWindow ? ' Fiche prête à imprimer en PDF.' : ''}`);
 }
 async function deleteBooking(id, returnDate) {
@@ -1594,6 +1793,7 @@ async function deleteBooking(id, returnDate) {
   const removedIds = new Set(booking.ids.map(String));
   if (booking.collection === 'books') state.bookLoans = state.bookLoans.filter((loan) => !removedIds.has(String(loan.id)));
   else if (booking.collection === 'pedagogy') state.pedagogyLoans = state.pedagogyLoans.filter((loan) => !removedIds.has(String(loan.id)));
+  else if (booking.collection === 'science') state.scienceLoans = state.scienceLoans.filter((loan) => !removedIds.has(String(loan.id)));
   else if (booking.collection === 'digital') state.digitalLoans = state.digitalLoans.filter((loan) => !removedIds.has(String(loan.id)));
   else if (booking.collection === 'eps') state.epsLoans = state.epsLoans.filter((loan) => !removedIds.has(String(loan.id)));
   else state.loans = state.loans.filter((loan) => !removedIds.has(String(loan.id)));
@@ -1603,6 +1803,7 @@ async function deleteBooking(id, returnDate) {
   closeManageModal();
   if (booking.collection === 'books') renderSeriesCalendar();
   else if (booking.collection === 'pedagogy') renderPedagogyCalendar();
+  else if (booking.collection === 'science') renderScienceCalendar();
   else if (booking.collection === 'digital') renderDigitalCalendar();
   else if (booking.collection === 'eps') renderEPSCalendar();
   else renderCalendar();
@@ -1610,6 +1811,7 @@ async function deleteBooking(id, returnDate) {
   if (printWindow) printSheet('Fiche de retour', booking, resources, booking.loan_date, returnDate, printWindow);
   if (booking.collection === 'digital') refreshDigitalData().catch((error) => console.error('Actualisation du stock numérique après annulation impossible :', error));
   if (booking.collection === 'eps') refreshEPSData().catch((error) => console.error('Actualisation du stock EPS après annulation impossible :', error));
+  if (booking.collection === 'science') refreshScienceData().catch((error) => console.error('Actualisation des réservations Sciences après annulation impossible :', error));
   if (result.email_status === 'sent') showToast('Annulation enregistrée et courriel envoyé à l’emprunteur.');
   else showToast(`Annulation enregistrée, mais le courriel à l’emprunteur a échoué : ${result.email_error || 'aucun détail reçu'}.`);
 }
@@ -1626,13 +1828,15 @@ function route() {
   const digital = location.hash === '#numerique';
   const eps = location.hash === '#eps';
   const pedagogy = location.hash === '#pedagogie';
-  state.collection = pedagogy ? 'pedagogy' : eps ? 'eps' : digital ? 'digital' : books ? 'books' : 'games';
-  $('#home-view').hidden = games || books || digital || eps || pedagogy;
+  const science = location.hash === '#sciences';
+  state.collection = science ? 'science' : pedagogy ? 'pedagogy' : eps ? 'eps' : digital ? 'digital' : books ? 'books' : 'games';
+  $('#home-view').hidden = games || books || digital || eps || pedagogy || science;
   $('#games-view').hidden = !games;
   $('#series-view').hidden = !books;
   $('#digital-view').hidden = !digital;
   $('#eps-view').hidden = !eps;
   $('#pedagogy-view').hidden = !pedagogy;
+  $('#science-view').hidden = !science;
   if (games && !state.games.length) loadGames().catch((error) => {
     $('#games-body').innerHTML = `<tr><td colspan="6" class="loading">${escapeHtml(error.message)}</td></tr>`;
   });
@@ -1660,7 +1864,15 @@ function route() {
   else if (pedagogy) refreshPedagogyData().then(() => {
     if (state.selectedPedagogy.length) renderPedagogyCalendar();
   }).catch((error) => console.error('Actualisation des livres pédagogiques impossible :', error));
+  if (science && !state.scienceEquipment.length) loadScience().catch((error) => {
+    $('#science-body').innerHTML = `<tr><td colspan="2" class="loading">${escapeHtml(error.message)}</td></tr>`;
+  });
+  else if (science) refreshScienceData().then(() => {
+    if (state.selectedScience.length) renderScienceCalendar();
+  }).catch((error) => console.error('Actualisation du matériel scientifique impossible :', error));
 }
+$('#science-previous-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() - 1); renderScienceCalendar(); });
+$('#science-next-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() + 1); renderScienceCalendar(); });
 $('#pedagogy-previous-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() - 1); renderPedagogyCalendar(); });
 $('#pedagogy-next-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() + 1); renderPedagogyCalendar(); });
 document.addEventListener('keydown', (event) => {
@@ -1669,5 +1881,9 @@ document.addEventListener('keydown', (event) => {
     const modal = $(`#${id}`);
     if (modal && !modal.hidden) modal.hidden = true;
   }
+});
+document.addEventListener('keydown', (event) => {
+  const modal = $('#science-reservations-modal');
+  if (event.key === 'Escape' && modal && !modal.hidden) modal.hidden = true;
 });
 window.addEventListener('hashchange', route); window.addEventListener('focus', refreshLoansWhenVisible); document.addEventListener('visibilitychange', refreshLoansWhenVisible); setInterval(refreshLoansWhenVisible, 15000); $('#previous-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() - 1); renderCalendar(); }); $('#next-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() + 1); renderCalendar(); }); $('#series-previous-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() - 1); renderSeriesCalendar(); }); $('#series-next-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() + 1); renderSeriesCalendar(); }); $('#digital-previous-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() - 1); renderDigitalCalendar(); }); $('#digital-next-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() + 1); renderDigitalCalendar(); }); $('#eps-previous-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() - 1); renderEPSCalendar(); }); $('#eps-next-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() + 1); renderEPSCalendar(); }); $('#close-modal').addEventListener('click', closeModal); $('#loan-modal').addEventListener('click', (event) => { if (event.target.id === 'loan-modal') closeModal(); }); $('#loan-form').addEventListener('submit', submitLoan); $('#manager-button').addEventListener('click', openManagerModal); $('#manager-modal').addEventListener('click', (event) => { if (event.target.id === 'manager-modal') closeManagerModal(); }); $('#close-manager-modal').addEventListener('click', closeManagerModal); $('#manager-form').addEventListener('submit', loginManager); $('#manage-modal').addEventListener('click', (event) => { if (event.target.id === 'manage-modal') closeManageModal(); }); $('#close-manage-modal').addEventListener('click', closeManageModal); document.addEventListener('keydown', (event) => { if (event.key === 'Escape') { if (!$('#loan-modal').hidden) closeModal(); if (!$('#manager-modal').hidden) closeManagerModal(); if (!$('#manage-modal').hidden) closeManageModal(); const pendingModal = $('#pending-reservations-modal'); if (pendingModal && !pendingModal.hidden) pendingModal.hidden = true; const digitalLoansModal = $('#digital-loans-modal'); if (digitalLoansModal && !digitalLoansModal.hidden) digitalLoansModal.hidden = true; const epsLoansModal = $('#eps-loans-modal'); if (epsLoansModal && !epsLoansModal.hidden) epsLoansModal.hidden = true; const epsPendingModal = $('#eps-pending-modal'); if (epsPendingModal && !epsPendingModal.hidden) epsPendingModal.hidden = true; } }); route();

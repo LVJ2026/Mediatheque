@@ -3,6 +3,7 @@ import { bookLoansTable, loansTable, syncCurrentBookAvailability } from '../../_
 import { digitalLoansTable, digitalInventoryTable, syncDigitalAvailability } from '../../_digital.js';
 import { epsLoansTable } from '../../_eps.js';
 import { pedagogyLoansTable } from '../../_pedagogy.js';
+import { scienceLoansTable } from '../../_science.js';
 import { isManager, unauthorized } from '../../_manager.js';
 
 export async function onRequestPost({ request, env, waitUntil }) {
@@ -22,7 +23,8 @@ export async function onRequestPost({ request, env, waitUntil }) {
     const isDigital = input.collection === 'digital';
     const isEps = input.collection === 'eps';
     const isPedagogy = input.collection === 'pedagogy';
-    const table = isBooks ? bookLoansTable(env) : isDigital ? digitalLoansTable(env) : isEps ? epsLoansTable(env) : isPedagogy ? pedagogyLoansTable(env) : loansTable(env);
+    const isScience = input.collection === 'science';
+    const table = isBooks ? bookLoansTable(env) : isDigital ? digitalLoansTable(env) : isEps ? epsLoansTable(env) : isPedagogy ? pedagogyLoansTable(env) : isScience ? scienceLoansTable(env) : loansTable(env);
     const records = input.loan_ids.map((id) => ({ id: Number(id), fields: { Retour: input.return_date } }));
     await gristRequest(env, table, {
       method: 'PATCH',

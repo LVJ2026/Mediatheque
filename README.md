@@ -6,7 +6,7 @@ Application JavaScript de reservation de ressources pour la mediatheque de l'Edu
 
 - `public/` : interface web statique JavaScript.
 - `functions/` : Cloudflare Pages Functions, API JavaScript connectee a Grist.
-- Grist : source des inventaires et réservations de jeux, livres/albums, matériel numérique et matériel EPS.
+- Grist : source des inventaires et réservations de jeux, livres/albums, matériel numérique, matériel EPS et matériel scientifique.
 
 ## Deploiement Cloudflare Pages
 
@@ -34,6 +34,8 @@ GRIST_DIGITAL_INVENTORY_TABLE=Inventaire Numerique
 GRIST_DIGITAL_LOANS_TABLE=Emprunts Numeriques
 GRIST_EPS_INVENTORY_TABLE=Inventaire EPS
 GRIST_EPS_LOANS_TABLE=Emprunts EPS
+GRIST_SCIENCE_INVENTORY_TABLE=Inventaires sciences
+GRIST_SCIENCE_LOANS_TABLE=Emprunts sciences
 GRIST_LOANS_TABLE=Table1
 GRIST_SCHOOLS_TABLE=Ecoles
 GRIST_ENABLED=true
@@ -104,5 +106,7 @@ Emprunts numériques (`Emprunts Numeriques`) : `Nom`, `Prenom`, `Mail_profession
 Inventaire EPS (`Inventaire EPS`) : `Matériel`, `Quantite_EPS` et `Quantite _restante`. La page publique affiche respectivement `Quantite_EPS` comme quantité totale et `Quantite _restante` comme stock restant. La validation serveur calcule aussi la disponibilité sur toute la période à partir des réservations actives et refuse toute quantité supérieure au stock disponible. Les demandes EPS sont limitées à un seul type de matériel par fiche.
 
 Emprunts EPS (`Emprunts EPS`) : `Nom`, `Prenom`, `Mail_professionnel`, `Ecole`, `Date_Emprunt`, `Date_Retour_prevu`, `Materiel` (référence vers l’inventaire), `Quantite`, `Validee` (case à cocher), `Retour`, `Date_Annulation`, `Demande_Envoyee`, `Confirmation_Envoyee` et `Rappel_Envoye`. Les colonnes de suivi des courriels sont de type Date. La validation envoie une confirmation avec les modalités de récupération; l’annulation informe l’emprunteur qu’il doit contacter la circonscription.
+
+Sciences (`Inventaires sciences` et `Emprunts sciences`) : chaque ligne d’inventaire est un matériel sélectionnable individuellement. Les emprunts utilisent `Materiel` (référence vers l’inventaire), `Nom`, `Prenom`, `Mail_professionnel`, `Ecole`, `Date_Emprunt`, `Date_Retour_prevu`, `Quantite`, `Retour` et `Date_Annulation`. Un matériel est indisponible sur toute période qui chevauche un emprunt actif. Les gestionnaires disposent d’un tableau des réservations, d’une action de retour ou d’annulation et d’un rappel par courriel à partir de la date de retour prévue. Les tables peuvent être configurées avec `GRIST_SCIENCE_INVENTORY_TABLE` et `GRIST_SCIENCE_LOANS_TABLE`.
 
 Une reservation groupant plusieurs jeux cree une ligne Grist par jeu, pour la meme periode.
