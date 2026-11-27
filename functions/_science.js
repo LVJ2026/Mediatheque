@@ -12,10 +12,6 @@ function scienceEquipmentId(fields) {
   return Number(fields.Materiel ?? fields['Matériel'] ?? fields.Equipement ?? fields['Équipement'] ?? fields.Equipment);
 }
 
-function scienceQuantity(fields) {
-  return Number(fields.Quantite ?? fields['Quantité'] ?? 1);
-}
-
 function isActiveScienceLoan(fields) {
   return scienceEquipmentId(fields) > 0
     && (fields.Date_Emprunt != null || fields['Date Emprunt'] != null)
@@ -33,7 +29,6 @@ function normalizeScienceEquipment(record) {
   return {
     id: Number(record.id),
     Equipement: scienceEquipmentName(fields),
-    quantity: 1,
   };
 }
 
@@ -60,7 +55,7 @@ function normalizeScienceLoan(record, inventoryRecords = []) {
     occupied_until: endedEarly ? addDays(returnDate, -1) : returnDate,
     equipment_id: equipmentId,
     equipment_name: equipment ? scienceEquipmentName(equipment.fields || {}) : `Matériel ${equipmentId}`,
-    quantity: scienceQuantity(fields),
+    quantity: 1,
     is_active: !returnedDate && !cancelledDate,
     cancelled_date: cancelledDate,
     collection: 'science',
@@ -107,5 +102,4 @@ export {
   scienceEquipmentName,
   scienceInventoryTable,
   scienceLoansTable,
-  scienceQuantity,
 };

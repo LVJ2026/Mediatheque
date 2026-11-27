@@ -262,7 +262,7 @@ async function loadScience() {
   state.scienceLoans = await loansResponse.json();
   loadSchools();
   $('#science-count').textContent = `${state.scienceEquipment.length} matériel${state.scienceEquipment.length > 1 ? 's' : ''}`;
-  $('#science-body').innerHTML = state.scienceEquipment.map((item) => `<tr data-science-id="${item.id}"><td class="selection-cell"><input type="radio" name="science-equipment" aria-label="Sélectionner ${escapeHtml(item.Equipement)}" ${item.quantity < 1 ? 'disabled' : ''}></td><td><strong>${escapeHtml(item.Equipement)}</strong></td></tr>`).join('');
+  $('#science-body').innerHTML = state.scienceEquipment.map((item) => `<tr data-science-id="${item.id}"><td class="selection-cell"><input type="radio" name="science-equipment" aria-label="Sélectionner ${escapeHtml(item.Equipement)}"></td><td><strong>${escapeHtml(item.Equipement)}</strong></td></tr>`).join('');
   document.querySelectorAll('#science-body tr').forEach((row) => {
     row.addEventListener('click', (event) => { if (!event.target.closest('input')) toggleScience(Number(row.dataset.scienceId)); });
     const radio = row.querySelector('input[type="radio"]');
@@ -527,7 +527,7 @@ function toggleEquipment(id) {
 }
 function toggleEps(id) {
   const equipment = state.epsEquipment.find((item) => item.id === id);
-  if (!equipment || equipment.quantity < 1) return;
+  if (!equipment) return;
   state.selectedEps = [{ ...equipment, requested_quantity: 1 }];
   state.month = new Date();
   document.querySelectorAll('#eps-body tr').forEach((row) => {
@@ -1087,7 +1087,7 @@ async function submitLoan(event) {
   if (!confirm(`Confirmer ${bookingType} de ${summary} du ${formatDate(loanDate)} au ${formatDate(endDate)} ?`)) return;
   const printWindow = window.open('', '_blank');
   const endpoint = isBooks ? '/api/book-loans/batch' : isPedagogy ? '/api/pedagogy-loans/batch' : isScience ? '/api/science-loans/batch' : isDigital ? '/api/digital-loans/batch' : isEPS ? '/api/eps-loans/batch' : '/api/loans/batch';
-  const payload = isBooks ? { ...data, books: bookSelection } : isPedagogy ? { ...data, book_id: pedagogySelection[0] } : isScience ? { ...data, equipment: [{ id: scienceSelection[0], quantity: 1 }] } : isDigital ? { ...data, equipment: digitalSelection } : isEPS ? { ...data, equipment: epsSelection } : { ...data, game_ids: gameIds };
+  const payload = isBooks ? { ...data, books: bookSelection } : isPedagogy ? { ...data, book_id: pedagogySelection[0] } : isScience ? { ...data, equipment: [{ id: scienceSelection[0] }] } : isDigital ? { ...data, equipment: digitalSelection } : isEPS ? { ...data, equipment: epsSelection } : { ...data, game_ids: gameIds };
   const response = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
   const result = await response.json();
   if (!response.ok) {

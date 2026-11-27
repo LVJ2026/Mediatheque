@@ -85,7 +85,6 @@ export async function onRequestPost({ request, env }) {
       Date_Emprunt: input.loan_date,
       Date_Retour_prevu: input.end_date,
       Materiel: equipmentId,
-      Quantite: 1,
     } };
     const created = await gristRequest(env, scienceLoansTable(env), {
       method: 'POST',
