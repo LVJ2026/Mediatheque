@@ -2,6 +2,7 @@ import { assertConfigured, gristRequest } from '../../_grist.js';
 import { bookLoansTable, loansTable, syncCurrentBookAvailability } from '../../_books.js';
 import { digitalInventoryTable, digitalLoansTable, syncDigitalAvailability } from '../../_digital.js';
 import { epsLoansTable } from '../../_eps.js';
+import { pedagogyLoansTable } from '../../_pedagogy.js';
 import { sendMail } from '../../_mail.js';
 import { isManager, unauthorized } from '../../_manager.js';
 
@@ -23,7 +24,8 @@ export async function onRequestPost({ request, env, waitUntil }) {
     const isBooks = input.collection === 'books';
     const isDigital = input.collection === 'digital';
     const isEps = input.collection === 'eps';
-    const table = isBooks ? bookLoansTable(env) : isDigital ? digitalLoansTable(env) : isEps ? epsLoansTable(env) : loansTable(env);
+    const isPedagogy = input.collection === 'pedagogy';
+    const table = isBooks ? bookLoansTable(env) : isDigital ? digitalLoansTable(env) : isEps ? epsLoansTable(env) : isPedagogy ? pedagogyLoansTable(env) : loansTable(env);
     const ids = new Set(input.loan_ids.map(Number));
     const payload = await gristRequest(env, table);
     const loans = (payload.records || []).filter((record) => ids.has(Number(record.id)));

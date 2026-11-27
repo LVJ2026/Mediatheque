@@ -28,6 +28,8 @@ GRIST_BASE_URL=https://grist.numerique.gouv.fr
 GRIST_INVENTORY_TABLE=Inventaire_des_jeux
 GRIST_BOOKS_INVENTORY_TABLE=Inventaire livres albums
 GRIST_BOOKS_LOANS_TABLE=Emprunts livres albums
+GRIST_PEDAGOGY_INVENTORY_TABLE=Inventaire peda
+GRIST_PEDAGOGY_LOANS_TABLE=Emprunts peda
 GRIST_DIGITAL_INVENTORY_TABLE=Inventaire Numerique
 GRIST_DIGITAL_LOANS_TABLE=Emprunts Numeriques
 GRIST_EPS_INVENTORY_TABLE=Inventaire EPS
@@ -88,6 +90,8 @@ Emprunts jeux (`Table1`) : `Nom`, `Prenom`, `Mail_professionnel`, `Ecole`, `Date
 Emprunts livres/albums (`Emprunts livres albums`) : ajouter les colonnes emprunteur/dates `Nom`, `Prenom`, `Mail_professionnel`, `Ecole`, `Date_Emprunt`, `Date_Fin`, `Retour`, `Date_Annulation`, `Confirmation_Demandee`, `Rappel_Envoye`, `Confirmation_Envoyee` et `Retard_Notification_Envoyee`, en plus de `Titre`, `Auteur`, `Lieu` et `Quantite`. Les quatre marqueurs sont des colonnes Date. La quantité de la ligne est celle demandée pour cette série.
 
 Inventaire livres/albums (`Inventaire livres albums`) : `Titre`, `Auteur`, `Lieu`, `Quantite`, `Qte_empruntee` (affiché « Qté empruntée ») et `Reste`. `Quantite` est le stock total. `Qte_empruntee` contient le nombre total d’exemplaires actuellement empruntés et est recalculé depuis les emprunts actifs après réservation, retour ou annulation. `Reste` est la disponibilité affichée dans l’application, généralement calculée par Grist comme `Quantite - Qte_empruntee`. Une réservation de plusieurs séries crée une ligne par série, avec le même emprunteur et la même période.
+
+Livres pédagogiques (`Inventaire peda`) : l’inventaire contient `Titre`, `Auteur` et `Edition` (ou `Édition`); chaque ligne représente un livre réservable individuellement. La table `Emprunts peda` contient `Titre` (référence vers l’inventaire), `Nom`, `Prenom`, `Mail_professionnel`, `Ecole`, `Date_Emprunt`, `Date_Retour_prevu`, `Validee`, `Retour`, `Date_Annulation`, `Demande_Envoyee` et `Confirmation_Envoyee` (colonnes de date pour les dates de suivi). Chaque demande est une pré-réservation qui bloque la disponibilité du livre pour la période demandée jusqu’à validation, retour ou annulation. Un courriel de demande est envoyé au demandeur et aux gestionnaires; la validation envoie une confirmation avec les modalités de récupération. Les noms de tables peuvent être remplacés avec `GRIST_PEDAGOGY_INVENTORY_TABLE` et `GRIST_PEDAGOGY_LOANS_TABLE`.
 
 Les rappels de retour des jeux lisent `Table1`; la confirmation des livres/albums part dès la création de la réservation, et les courriels des livres/albums sont envoyés par le Worker depuis `Emprunts livres albums`.
 

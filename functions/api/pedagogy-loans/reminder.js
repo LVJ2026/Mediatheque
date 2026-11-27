@@ -1,0 +1,53 @@
+import { assertConfigured, gristRequest } from '../../_grist.js';
+import { normalizePedagogyLoan, pedagogyInventoryTable, pedagogyLoansTable } from '../../_pedagogy.js';
+import { sendMail } from '../../_mail.js';
+import { isManager, unauthorized } from '../../_manager.js';
+
+function dateInParis(date) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Paris',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
+}
+
+export async function onRequestPost({ request, env }) {
+  if (!await isManager(request, env)) return unauthorized();
+  try {
+    assertConfigured(env);
+    const input = await request.json();
+    if (!Array.isArray(input.loan_ids) || !input.loan_ids.length
+      || !input.loan_ids.every((id) => Number.isInteger(Number(id)) && Number(id) > 0)
+      || new Set(input.loan_ids.map(Number)).size !== input.loan_ids.length) {
+      return Response.json({ detail: 'Identifiants de réservation invalides.' }, { status: 422 });
+    }
+    const ids = new Set(input.loan_ids.map(Number));
+    const [payload, inventory] = await Promise.all([
+      gristRequest(env, pedagogyLoansTable(env)),
+      gristRequest(env, pedagogyInventoryTable(env)),
+    ]);
+    const records = (payload.records || []).filter((record) => ids.has(Number(record.id)));
+    if (records.length !== ids.size) return Response.json({ detail: 'Une réservation est introuvable.' }, { status: 404 });
+    if (records.some((record) => record.fields?.Retour || record.fields?.Date_Annulation)) {
+      return Response.json({ detail: 'Le livre a déjà été rendu ou la réservation a été annulée.' }, { status: 409 });
+    }
+    const loans = records.map((record) => normalizePedagogyLoan(record, inventory.records || []));
+    const dueDate = loans[0].return_date;
+    if (loans.some((loan) => loan.return_date !== dueDate
+      || loan.professional_email !== loans[0].professional_email)
+      || dueDate > dateInParis(new Date())) {
+      return Response.json({ detail: 'Le rappel est disponible à partir de la date de retour prévue.' }, { status: 409 });
+    }
+    const first = loans[0];
+    await sendMail(env, {
+      to: first.professional_email,
+      subject: 'Rappel : retour de votre livre pédagogique',
+      text: `Bonjour ${first.first_name} ${first.name},\n\nSauf erreur de notre part, le livre « ${first.book_title} » devait être rendu le ${new Intl.DateTimeFormat('fr-FR', { dateStyle: 'long', timeZone: 'UTC' }).format(new Date(`${dueDate}T12:00:00Z`))}.\n\nMerci de prendre contact avec la circonscription pour organiser son retour.`,
+    });
+    return Response.json({ sent: true });
+  } catch (error) {
+    console.error('Échec du courriel de rappel du livre pédagogique :', error.message);
+    return Response.json({ detail: error.message }, { status: 503 });
+  }
+}

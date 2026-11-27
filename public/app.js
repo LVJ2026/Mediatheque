@@ -1,10 +1,13 @@
-const state = { games: [], loans: [], selectedGames: [], books: [], bookLoans: [], selectedBooks: [], equipment: [], digitalLoans: [], selectedEquipment: [], epsEquipment: [], epsLoans: [], selectedEps: [], collection: 'games', month: new Date(), manager: false };
+const state = { games: [], loans: [], selectedGames: [], books: [], bookLoans: [], selectedBooks: [], pedagogyBooks: [], pedagogyLoans: [], selectedPedagogy: [], pedagogyLoaded: false, pedagogyLoading: false, equipment: [], digitalLoans: [], selectedEquipment: [], epsEquipment: [], epsLoans: [], selectedEps: [], collection: 'games', month: new Date(), manager: false };
 let loansRefreshInFlight = false;
 const $ = (selector) => document.querySelector(selector);
 const iso = (date) => { const local = new Date(date); local.setMinutes(local.getMinutes() - local.getTimezoneOffset()); return local.toISOString().slice(0, 10); };
 const formatDate = (value) => new Intl.DateTimeFormat('fr-FR', { dateStyle: 'full' }).format(new Date(`${value}T12:00:00`));
 const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[character]);
 const normalizeSearchText = (value) => String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLocaleLowerCase('fr-FR');
+const pedagogyCard = document.querySelector('.collection-books');
+pedagogyCard.href = '#pedagogie';
+pedagogyCard.querySelector('b').insertAdjacentHTML('beforebegin', '<small class="collection-note">Pré-réservation soumise à validation des gestionnaires</small>');
 
 async function loadGames() {
   const [gamesResponse, loansResponse] = await Promise.all([fetch('/api/games'), fetch('/api/loans')]);
@@ -272,6 +275,37 @@ async function loadBooks() {
     });
   });
 }
+async function loadPedagogy() {
+  const [inventoryResponse, loansResponse] = await Promise.all([
+    fetch('/api/pedagogy-books', { cache: 'no-store' }),
+    fetch('/api/pedagogy-loans', { cache: 'no-store' }),
+  ]);
+  if (!inventoryResponse.ok || !loansResponse.ok) {
+    const failedResponse = !loansResponse.ok ? loansResponse : inventoryResponse;
+    const detail = await failedResponse.json().catch(() => ({}));
+    throw new Error(detail.detail || 'Impossible de charger l’inventaire et les réservations des livres pédagogiques.');
+  }
+  const [inventory, loans] = await Promise.all([inventoryResponse.json(), loansResponse.json()]);
+  state.pedagogyBooks = inventory.books;
+  state.pedagogyLoans = loans;
+  state.pedagogyLoaded = true;
+  loadSchools();
+  $('#pedagogy-count').textContent = `${state.pedagogyBooks.length} livre${state.pedagogyBooks.length > 1 ? 's' : ''}`;
+  $('#pedagogy-body').innerHTML = state.pedagogyBooks.map((book) => `<tr data-pedagogy-id="${book.id}"><td class="selection-cell"><input type="radio" name="pedagogy-book" aria-label="Sélectionner ${escapeHtml(book.Titre)}"></td><td><strong>${escapeHtml(book.Titre)}</strong></td><td>${escapeHtml(book.Auteur) || '—'}</td><td>${escapeHtml(book.Edition) || '—'}</td></tr>`).join('');
+  updatePendingPedagogyButton();
+  document.querySelectorAll('#pedagogy-body tr').forEach((row) => {
+    row.addEventListener('click', (event) => { if (!event.target.closest('input')) togglePedagogy(Number(row.dataset.pedagogyId)); });
+    const radio = row.querySelector('input[type="radio"]');
+    radio.addEventListener('click', (event) => event.stopPropagation());
+    radio.addEventListener('change', () => togglePedagogy(Number(row.dataset.pedagogyId)));
+  });
+}
+async function refreshPedagogyData() {
+  const response = await fetch('/api/pedagogy-loans', { cache: 'no-store' });
+  if (!response.ok) throw new Error('Impossible d’actualiser les réservations des livres pédagogiques.');
+  state.pedagogyLoans = await response.json();
+  updatePendingPedagogyButton();
+}
 function filterBooks() {
   const titleQuery = normalizeSearchText($('#series-title-search').value);
   const authorQuery = normalizeSearchText($('#series-author-search').value);
@@ -313,7 +347,7 @@ async function refreshBookData() {
   });
 }
 async function refreshLoans() {
-  if ((!state.games.length && !state.books.length && !state.equipment.length && !state.epsEquipment.length) || loansRefreshInFlight) return;
+  if ((!state.games.length && !state.books.length && !state.pedagogyBooks.length && !state.equipment.length && !state.epsEquipment.length) || loansRefreshInFlight) return;
   loansRefreshInFlight = true;
   try {
     if (state.equipment.length) {
@@ -332,8 +366,14 @@ async function refreshLoans() {
       const bookLoansResponse = await fetch('/api/book-loans', { cache: 'no-store' });
       if (bookLoansResponse.ok) state.bookLoans = await bookLoansResponse.json();
     }
+    if (state.pedagogyBooks.length) {
+      const pedagogyResponse = await fetch('/api/pedagogy-loans', { cache: 'no-store' });
+      if (pedagogyResponse.ok) state.pedagogyLoans = await pedagogyResponse.json();
+      updatePendingPedagogyButton();
+    }
     if (state.selectedGames.length) renderCalendar();
     if (state.selectedBooks.length) renderSeriesCalendar();
+    if (state.selectedPedagogy.length) renderPedagogyCalendar();
     const manageModal = $('#manage-modal');
     if (!manageModal.hidden && manageModal.dataset.date) {
       if (manageModal.dataset.bookingId && allBookings().some((booking) => String(booking.id) === manageModal.dataset.bookingId)) {
@@ -402,6 +442,25 @@ function toggleBook(id) {
     renderSeriesCalendar();
   }
 }
+function togglePedagogy(id) {
+  const book = state.pedagogyBooks.find((item) => item.id === id);
+  if (!book) return;
+  state.selectedPedagogy = [{ ...book }];
+  const today = iso(new Date());
+  const nextReservation = state.pedagogyLoans
+    .filter((loan) => loan.is_active && loan.book_id === id && loan.return_date >= today)
+    .sort((first, second) => first.loan_date.localeCompare(second.loan_date))[0];
+  state.month = nextReservation ? new Date(`${nextReservation.loan_date}T12:00:00`) : new Date();
+  document.querySelectorAll('#pedagogy-body tr').forEach((row) => {
+    const selected = state.selectedPedagogy.some((item) => item.id === Number(row.dataset.pedagogyId));
+    row.classList.toggle('selected', selected);
+    row.querySelector('input[type="radio"]').checked = selected;
+  });
+  $('#pedagogy-empty-calendar').hidden = true;
+  $('#pedagogy-calendar-content').hidden = false;
+  $('#pedagogy-selected').textContent = book.Titre;
+  renderPedagogyCalendar();
+}
 function toggleEquipment(id) {
   const equipment = state.equipment.find((item) => item.id === id);
   if (!equipment) return;
@@ -462,6 +521,15 @@ function clearBookSelection() {
   });
   $('#series-empty-calendar').hidden = false;
   $('#series-calendar-content').hidden = true;
+}
+function clearPedagogySelection() {
+  state.selectedPedagogy = [];
+  document.querySelectorAll('#pedagogy-body tr').forEach((row) => {
+    row.classList.remove('selected');
+    row.querySelector('input[type="radio"]').checked = false;
+  });
+  $('#pedagogy-empty-calendar').hidden = false;
+  $('#pedagogy-calendar-content').hidden = true;
 }
 function clearEquipmentSelection() {
   state.selectedEquipment = [];
@@ -631,8 +699,8 @@ function seriesAvailability() {
   }
   return days;
 }
-function allBookings(collection = state.collection) { const source = collection === 'books' ? state.bookLoans : collection === 'digital' ? state.digitalLoans : collection === 'eps' ? state.epsLoans : state.loans; const grouped = new Map(); source.forEach((loan) => { const key = [loan.name, loan.first_name, loan.professional_email, loan.school, loan.loan_date, loan.return_date, collection].join('\u001f'); if (!grouped.has(key)) grouped.set(key, { ...loan, collection, ids: [], entries: [] }); const booking = grouped.get(key); booking.confirmation_sent ||= loan.confirmation_sent; booking.ids.push(loan.id); booking.entries.push(loan); }); return [...grouped.values()]; }
-function loansForDate(date) { return allBookings().filter((booking) => booking.entries.some((loan) => { const selected = state.collection === 'books' ? state.selectedBooks.some((book) => sameBook(loan, book)) : state.collection === 'digital' ? state.selectedEquipment.some((equipment) => equipment.id === loan.equipment_id) : state.collection === 'eps' ? state.selectedEps.some((equipment) => equipment.id === loan.equipment_id) : state.selectedGames.some((game) => game.id === loan.game_id); return selected && loan.loan_date <= date && date <= (loan.occupied_until || loan.return_date); })); }
+function allBookings(collection = state.collection) { const source = collection === 'books' ? state.bookLoans : collection === 'pedagogy' ? state.pedagogyLoans : collection === 'digital' ? state.digitalLoans : collection === 'eps' ? state.epsLoans : state.loans; const grouped = new Map(); source.forEach((loan) => { const key = [loan.name, loan.first_name, loan.professional_email, loan.school, loan.loan_date, loan.return_date, collection, collection === 'pedagogy' ? loan.book_id : ''].join('\u001f'); if (!grouped.has(key)) grouped.set(key, { ...loan, collection, ids: [], entries: [] }); const booking = grouped.get(key); booking.confirmation_sent ||= loan.confirmation_sent; booking.ids.push(loan.id); booking.entries.push(loan); }); return [...grouped.values()]; }
+function loansForDate(date) { return allBookings().filter((booking) => booking.entries.some((loan) => { const selected = state.collection === 'books' ? state.selectedBooks.some((book) => sameBook(loan, book)) : state.collection === 'pedagogy' ? state.selectedPedagogy.some((book) => book.id === loan.book_id) : state.collection === 'digital' ? state.selectedEquipment.some((equipment) => equipment.id === loan.equipment_id) : state.collection === 'eps' ? state.selectedEps.some((equipment) => equipment.id === loan.equipment_id) : state.selectedGames.some((game) => game.id === loan.game_id); return selected && loan.loan_date <= date && date <= (loan.occupied_until || loan.return_date); })); }
 function renderCalendar() { const year = state.month.getFullYear(); const month = state.month.getMonth(); $('#calendar-month').textContent = new Intl.DateTimeFormat('fr-FR', { month: 'long', year: 'numeric' }).format(state.month); const firstDay = (new Date(year, month, 1).getDay() + 6) % 7; const daysInMonth = new Date(year, month + 1, 0).getDate(); const today = iso(new Date()); const busy = occupiedDates(); let html = ''; for (let index = 0; index < firstDay; index += 1) html += '<button class="day empty" tabindex="-1" aria-hidden="true"></button>'; for (let day = 1; day <= daysInMonth; day += 1) { const date = iso(new Date(year, month, day)); const occupied = busy.has(date); const unavailable = occupied || date < today; const classes = ['day', occupied ? 'occupied' : '', date < today ? 'past' : '', date === today ? 'today' : ''].filter(Boolean).join(' '); const disabled = unavailable && !state.manager; html += `<button class="${classes}" data-date="${date}" ${disabled ? 'disabled' : ''}>${day}</button>`; } $('#calendar-grid').innerHTML = html; document.querySelectorAll('#calendar-grid .day:not(.empty)').forEach((button) => button.addEventListener('click', () => { if (button.classList.contains('occupied')) openManageModal(button.dataset.date); else openModal(button.dataset.date); })); }
 function renderSeriesCalendar() {
   const year = state.month.getFullYear();
@@ -657,6 +725,36 @@ function renderSeriesCalendar() {
   document.querySelectorAll('#series-calendar-grid .day:not(.empty)').forEach((button) => button.addEventListener('click', () => {
     if (button.classList.contains('occupied') || (state.manager && button.classList.contains('partial'))) openManageModal(button.dataset.date);
     else openModal(button.dataset.date);
+  }));
+}
+function pedagogyBookingForDate(book, date) {
+  return state.pedagogyLoans.find((loan) => loan.is_active && loan.book_id === book.id
+    && loan.loan_date <= date && date <= (loan.occupied_until || loan.return_date));
+}
+function renderPedagogyCalendar() {
+  if (!state.selectedPedagogy.length) return;
+  const year = state.month.getFullYear();
+  const month = state.month.getMonth();
+  $('#pedagogy-calendar-month').textContent = new Intl.DateTimeFormat('fr-FR', { month: 'long', year: 'numeric' }).format(state.month);
+  const firstDay = (new Date(year, month, 1).getDay() + 6) % 7;
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const today = iso(new Date());
+  const book = state.selectedPedagogy[0];
+  let html = '';
+  for (let index = 0; index < firstDay; index += 1) html += '<button class="day empty" tabindex="-1" aria-hidden="true"></button>';
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    const date = iso(new Date(year, month, day));
+    const booking = pedagogyBookingForDate(book, date);
+    const status = booking ? booking.is_approved ? 'approved' : 'pending' : 'available';
+    const classes = ['day', `pedagogy-${status}`, date < today ? 'past' : '', date === today ? 'today' : ''].filter(Boolean).join(' ');
+    const disabled = date < today || (Boolean(booking) && !state.manager);
+    html += `<button class="${classes}" data-date="${date}" ${disabled ? 'disabled' : ''}>${day}</button>`;
+  }
+  $('#pedagogy-calendar-grid').innerHTML = html;
+  document.querySelectorAll('#pedagogy-calendar-grid .day:not(.empty)').forEach((button) => button.addEventListener('click', () => {
+    const booking = pedagogyBookingForDate(book, button.dataset.date);
+    if (state.manager && booking) openManageModal(button.dataset.date, booking.id);
+    else if (!booking && button.dataset.date >= today) openModal(button.dataset.date);
   }));
 }
 function availableQuantityForPeriod(book, startDate, endDate) {
@@ -765,12 +863,28 @@ function renderEpsQuantityFields(startDate, endDate) {
     updateSelection();
   });
 }
+function renderPedagogyAvailability(startDate, endDate) {
+  const container = $('#pedagogy-quantity-fields');
+  const isPedagogy = state.collection === 'pedagogy';
+  container.hidden = !isPedagogy;
+  if (!isPedagogy) return;
+  const submitButton = $('#loan-form').querySelector('button[type="submit"]');
+  const book = state.selectedPedagogy[0];
+  const conflict = book && state.pedagogyLoans.some((loan) => loan.is_active && loan.book_id === book.id
+    && startDate <= (loan.occupied_until || loan.return_date) && endDate >= loan.loan_date);
+  submitButton.disabled = !book || Boolean(conflict);
+  container.innerHTML = conflict
+    ? '<p class="form-error">Ce livre est déjà réservé sur cette période. Choisissez d’autres dates.</p>'
+    : `<p class="modal-note">${escapeHtml(book?.Titre || 'Livre pédagogique')} est disponible sur cette période. Cette demande devra être validée par un gestionnaire.</p>`;
+}
 function openModal(date) {
   const form = $('#loan-form');
   const startInput = $('#loan-start-date');
   const endInput = $('#loan-end-date');
   $('#modal-title').textContent = state.collection === 'books'
     ? state.selectedBooks.map((item) => `${item.Titre} × ${item.requested_quantity}`).join(' + ')
+    : state.collection === 'pedagogy'
+      ? state.selectedPedagogy.map((item) => item.Titre).join(' + ')
     : state.collection === 'digital'
       ? state.selectedEquipment.map((item) => `${item.Equipement} × ${item.requested_quantity}`).join(' + ')
       : state.collection === 'eps'
@@ -778,15 +892,16 @@ function openModal(date) {
       : state.selectedGames.map((item) => item.Jeu).join(' + ');
   form.dataset.gameIds = JSON.stringify(state.selectedGames.map((item) => item.id));
   form.dataset.bookSelection = JSON.stringify(state.selectedBooks.map((item) => ({ id: item.id, quantity: item.requested_quantity })));
+  form.dataset.pedagogySelection = JSON.stringify(state.selectedPedagogy.map((item) => item.id));
   form.dataset.digitalSelection = JSON.stringify(state.selectedEquipment.map((item) => ({ id: item.id, quantity: item.requested_quantity })));
   form.dataset.epsSelection = JSON.stringify(state.selectedEps.map((item) => ({ id: item.id, quantity: item.requested_quantity })));
   form.dataset.collection = state.collection;
   form.reset();
-  $('#loan-modal-eyebrow').textContent = state.collection === 'digital' || state.collection === 'eps'
+  $('#loan-modal-eyebrow').textContent = state.collection === 'digital' || state.collection === 'eps' || state.collection === 'pedagogy'
     ? 'Pré-réservation soumise à validation'
     : 'Nouvelle réservation';
   form.querySelector('button[type="submit"]').firstChild.textContent = state.collection === 'digital'
-    || state.collection === 'eps'
+    || state.collection === 'eps' || state.collection === 'pedagogy'
     ? 'Enregistrer la pré-réservation '
     : 'Enregistrer la réservation ';
   startInput.value = date;
@@ -800,6 +915,7 @@ function openModal(date) {
     if (endInput.value < startInput.value) endInput.value = startInput.value;
     $('#modal-date').textContent = `Du ${formatDate(startInput.value)} au ${formatDate(endInput.value)}`;
     renderBookQuantityFields(startInput.value, endInput.value);
+    renderPedagogyAvailability(startInput.value, endInput.value);
     renderDigitalQuantityFields(startInput.value, endInput.value);
     renderEpsQuantityFields(startInput.value, endInput.value);
   };
@@ -818,30 +934,34 @@ async function submitLoan(event) {
   const data = Object.fromEntries(new FormData(form));
   const gameIds = JSON.parse(form.dataset.gameIds);
   const bookSelection = JSON.parse(form.dataset.bookSelection || '[]');
+  const pedagogySelection = JSON.parse(form.dataset.pedagogySelection || '[]');
   const digitalSelection = JSON.parse(form.dataset.digitalSelection || '[]');
   const epsSelection = JSON.parse(form.dataset.epsSelection || '[]');
   const isBooks = form.dataset.collection === 'books';
+  const isPedagogy = form.dataset.collection === 'pedagogy';
   const isDigital = form.dataset.collection === 'digital';
   const isEPS = form.dataset.collection === 'eps';
   const loanDate = data.loan_date;
   const endDate = data.end_date;
   const summary = isBooks
     ? bookSelection.map((item) => `${state.books.find((book) => book.id === item.id)?.Titre || 'Série'} × ${item.quantity}`).join(', ')
+    : isPedagogy
+      ? state.pedagogyBooks.find((book) => book.id === pedagogySelection[0])?.Titre || 'Livre pédagogique'
     : isDigital
       ? digitalSelection.map((item) => `${state.equipment.find((equipment) => equipment.id === item.id)?.Equipement || 'Équipement'} × ${item.quantity}`).join(', ')
       : isEPS
         ? epsSelection.map((item) => `${state.epsEquipment.find((equipment) => equipment.id === item.id)?.Equipement || 'Équipement EPS'} × ${item.quantity}`).join(', ')
       : `${gameIds.length} jeu${gameIds.length > 1 ? 'x' : ''}`;
-  const bookingType = isDigital || isEPS ? 'la pré-réservation' : 'la réservation';
+  const bookingType = isDigital || isEPS || isPedagogy ? 'la pré-réservation' : 'la réservation';
   if (!confirm(`Confirmer ${bookingType} de ${summary} du ${formatDate(loanDate)} au ${formatDate(endDate)} ?`)) return;
   const printWindow = window.open('', '_blank');
-  const endpoint = isBooks ? '/api/book-loans/batch' : isDigital ? '/api/digital-loans/batch' : isEPS ? '/api/eps-loans/batch' : '/api/loans/batch';
-  const payload = isBooks ? { ...data, books: bookSelection } : isDigital ? { ...data, equipment: digitalSelection } : isEPS ? { ...data, equipment: epsSelection } : { ...data, game_ids: gameIds };
+  const endpoint = isBooks ? '/api/book-loans/batch' : isPedagogy ? '/api/pedagogy-loans/batch' : isDigital ? '/api/digital-loans/batch' : isEPS ? '/api/eps-loans/batch' : '/api/loans/batch';
+  const payload = isBooks ? { ...data, books: bookSelection } : isPedagogy ? { ...data, book_id: pedagogySelection[0] } : isDigital ? { ...data, equipment: digitalSelection } : isEPS ? { ...data, equipment: epsSelection } : { ...data, game_ids: gameIds };
   const response = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
   const result = await response.json();
   if (!response.ok) {
     printWindow?.close();
-    if ((isDigital || isEPS) && response.status === 409 && result.detail?.startsWith('Stock insuffisant')) {
+    if ((isDigital || isEPS || isPedagogy) && response.status === 409) {
       alert(result.detail);
     }
     $('#form-error').textContent = result.detail || 'La réservation n’a pas pu être enregistrée.';
@@ -850,12 +970,14 @@ async function submitLoan(event) {
   const returnDate = result[0]?.return_date || endDate;
   const resources = isBooks
     ? bookSelection.map((item) => `${state.books.find((book) => book.id === item.id)?.Titre || 'Série'} × ${item.quantity}`)
+    : isPedagogy
+      ? [state.pedagogyBooks.find((book) => book.id === pedagogySelection[0])?.Titre || 'Livre pédagogique']
     : isDigital
       ? digitalSelection.map((item) => `${state.equipment.find((equipment) => equipment.id === item.id)?.Equipement || 'Équipement'} × ${item.quantity}`)
       : isEPS
         ? epsSelection.map((item) => `${state.epsEquipment.find((equipment) => equipment.id === item.id)?.Equipement || 'Équipement EPS'} × ${item.quantity}`)
       : state.selectedGames;
-  if (printWindow) printSheet(isDigital || isEPS ? 'Fiche de pré-réservation' : 'Fiche d’emprunt', data, resources, loanDate, returnDate, printWindow);
+  if (printWindow) printSheet(isDigital || isEPS || isPedagogy ? 'Fiche de pré-réservation' : 'Fiche d’emprunt', data, resources, loanDate, returnDate, printWindow);
   if (isBooks) {
     state.bookLoans.push(...result);
     closeModal();
@@ -863,6 +985,12 @@ async function submitLoan(event) {
     refreshBookData()
       .then(renderSeriesCalendar)
       .catch((error) => console.error('Actualisation du stock après réservation impossible :', error));
+  } else if (isPedagogy) {
+    state.pedagogyLoans.push(...result);
+    closeModal();
+    renderPedagogyCalendar();
+    clearPedagogySelection();
+    refreshPedagogyData().catch((error) => console.error('Actualisation des livres pédagogiques après pré-réservation impossible :', error));
   } else if (isDigital) {
     state.digitalLoans.push(...result);
     closeModal();
@@ -901,7 +1029,7 @@ async function submitLoan(event) {
     : managerEmailStatus === 'partial'
       ? `Seul un des gestionnaires a été informé : ${managerEmailError ? decodeURIComponent(managerEmailError) : 'un envoi a échoué'}.`
       : `Échec du courriel au gestionnaire : ${managerEmailError ? decodeURIComponent(managerEmailError) : 'aucun détail reçu'}.`;
-  if (isDigital || isEPS) {
+  if (isDigital || isEPS || isPedagogy) {
     const messages = ['Pré-réservation enregistrée.'];
     messages.push(emailStatus === 'sent'
       ? 'Le courriel de réception a été envoyé au demandeur.'
@@ -917,6 +1045,7 @@ async function submitLoan(event) {
     if (stockStatus === 'failed') messages.push('La mise à jour du stock Grist a échoué.');
     messages.push(printStatus);
     if (isEPS) messages[0] = 'Pré-réservation EPS enregistrée.';
+    if (isPedagogy) messages[0] = 'Pré-réservation de livre pédagogique enregistrée.';
     showToast(messages.join(' '));
   } else {
     showToast(`Réservation enregistrée. ${printStatus} ${emailMessage} ${managerEmailMessage}`);
@@ -953,6 +1082,38 @@ function pendingEpsBookings() {
 function activeEpsBookings() {
   return allBookings('eps').filter((booking) => booking.is_active)
     .sort((first, second) => first.return_date.localeCompare(second.return_date));
+}
+function pendingPedagogyBookings() {
+  return allBookings('pedagogy').filter((booking) => !booking.is_approved && booking.is_active)
+    .sort((first, second) => first.loan_date.localeCompare(second.loan_date));
+}
+function activePedagogyBookings() {
+  return allBookings('pedagogy').filter((booking) => booking.is_active)
+    .sort((first, second) => first.return_date.localeCompare(second.return_date));
+}
+function openPedagogyBooking(booking) {
+  for (const id of ['pedagogy-loans-modal', 'pedagogy-pending-modal']) {
+    const modal = $(`#${id}`);
+    if (modal) modal.hidden = true;
+  }
+  state.collection = 'pedagogy';
+  const book = state.pedagogyBooks.find((item) => item.id === booking.book_id);
+  state.selectedPedagogy = book ? [{ ...book }] : [];
+  const today = iso(new Date());
+  const date = today < booking.loan_date ? booking.loan_date : today;
+  state.month = new Date(`${date}T12:00:00`);
+  if (location.hash !== '#pedagogie') location.hash = '#pedagogie';
+  route();
+  document.querySelectorAll('#pedagogy-body tr').forEach((row) => {
+    const selected = state.selectedPedagogy.some((item) => item.id === Number(row.dataset.pedagogyId));
+    row.classList.toggle('selected', selected);
+    row.querySelector('input[type="radio"]').checked = selected;
+  });
+  $('#pedagogy-empty-calendar').hidden = !state.selectedPedagogy.length;
+  $('#pedagogy-calendar-content').hidden = !state.selectedPedagogy.length;
+  if (book) $('#pedagogy-selected').textContent = book.Titre;
+  renderPedagogyCalendar();
+  openManageModal(date, booking.id);
 }
 function ensurePendingReservationsModal() {
   let modal = $('#pending-reservations-modal');
@@ -1132,6 +1293,58 @@ function updatePendingEpsButton() {
   const modal = $('#eps-pending-modal');
   if (!count && modal && !modal.hidden) modal.hidden = true;
 }
+function updatePendingPedagogyButton() {
+  const button = $('#pedagogy-pending-button');
+  if (!button) return;
+  const count = pendingPedagogyBookings().length;
+  button.textContent = `Pédagogie à valider (${count})`;
+  button.setAttribute('aria-label', `${count} pré-réservation${count === 1 ? '' : 's'} pédagogique${count === 1 ? '' : 's'} en attente de validation`);
+  button.classList.toggle('has-pending', count > 0);
+  const modal = $('#pedagogy-pending-modal');
+  if (!count && modal && !modal.hidden) modal.hidden = true;
+}
+async function showPedagogyLoans() {
+  const modal = ensureEpsManagerModal('pedagogy-loans-modal', 'Emprunts livres pédagogiques', 'close-pedagogy-loans');
+  const list = modal.querySelector('#pedagogy-loans-modal-list');
+  list.innerHTML = '<p class="modal-note">Chargement des emprunts…</p>';
+  modal.hidden = false;
+  try {
+    if (!state.pedagogyLoaded) await loadPedagogy();
+    await refreshPedagogyData();
+    const bookings = activePedagogyBookings();
+    if (!bookings.length) list.innerHTML = '<p class="modal-note">Aucun emprunt de livre pédagogique en cours.</p>';
+    else {
+      list.innerHTML = `<div class="table-wrap"><table class="digital-loans-table"><thead><tr><th>Nom de l’équipement</th><th>Emprunté par</th><th>Du… au…</th></tr></thead><tbody>${bookings.map((booking, index) => `<tr><td><button class="digital-loan-open" data-pedagogy-booking="${index}" type="button">${escapeHtml(booking.book_title)}</button></td><td>${escapeHtml(booking.first_name)} ${escapeHtml(booking.name)}</td><td>Du ${formatDate(booking.loan_date)} au ${formatDate(booking.return_date)}</td></tr>`).join('')}</tbody></table></div>`;
+      list.querySelectorAll('[data-pedagogy-booking]').forEach((button) => button.addEventListener('click', () => {
+        const booking = bookings[Number(button.dataset.pedagogyBooking)];
+        if (booking) openPedagogyBooking(booking);
+      }));
+    }
+  } catch (error) {
+    list.innerHTML = `<p class="form-error">${escapeHtml(error.message)}</p>`;
+  }
+}
+async function showPendingPedagogyReservations() {
+  const modal = ensureEpsManagerModal('pedagogy-pending-modal', 'Pédagogie à valider', 'close-pedagogy-pending');
+  const list = modal.querySelector('#pedagogy-pending-modal-list');
+  list.innerHTML = '<p class="modal-note">Chargement des demandes…</p>';
+  modal.hidden = false;
+  try {
+    if (!state.pedagogyLoaded) await loadPedagogy();
+    await refreshPedagogyData();
+    const bookings = pendingPedagogyBookings();
+    if (!bookings.length) list.innerHTML = '<p class="modal-note">Aucune pré-réservation pédagogique en attente de validation.</p>';
+    else {
+      list.innerHTML = bookings.map((booking, index) => `<article class="manage-item pending-reservation"><div><strong>${escapeHtml(booking.book_title)}</strong><span>${escapeHtml(booking.first_name)} ${escapeHtml(booking.name)} · ${formatDate(booking.loan_date)} au ${formatDate(booking.return_date)}</span></div><div class="manage-actions"><button class="secondary-button" data-pedagogy-pending="${index}" type="button">Ouvrir</button></div></article>`).join('');
+      list.querySelectorAll('[data-pedagogy-pending]').forEach((button) => button.addEventListener('click', () => {
+        const booking = bookings[Number(button.dataset.pedagogyPending)];
+        if (booking) openPedagogyBooking(booking);
+      }));
+    }
+  } catch (error) {
+    list.innerHTML = `<p class="form-error">${escapeHtml(error.message)}</p>`;
+  }
+}
 function syncManagerButtons() {
   $('#manager-button').hidden = state.manager;
   $('#logout-manager').hidden = !state.manager;
@@ -1141,17 +1354,26 @@ function syncManagerButtons() {
     dashboard.id = 'manager-dashboard';
     dashboard.className = 'manager-dashboard';
     dashboard.setAttribute('aria-label', 'Actions de gestionnaire');
-    dashboard.innerHTML = '<p class="eyebrow">Espace gestionnaire</p><div class="manager-dashboard-grid"><button id="digital-loans-button" class="manager-button" type="button">Emprunts numériques</button><button id="pending-reservations-button" class="manager-button pending-reservations-button" type="button"></button><button id="eps-loans-button" class="manager-button" type="button">Emprunts EPS</button><button id="eps-pending-button" class="manager-button pending-reservations-button" type="button"></button><button id="manager-bookings-button" class="manager-button" type="button">Réservations jeux et livres</button></div>';
+    dashboard.innerHTML = '<p class="eyebrow">Espace gestionnaire</p><div class="manager-dashboard-grid"><button id="digital-loans-button" class="manager-button" type="button">Emprunts numériques</button><button id="pending-reservations-button" class="manager-button pending-reservations-button" type="button"></button><button id="eps-loans-button" class="manager-button" type="button">Emprunts EPS</button><button id="eps-pending-button" class="manager-button pending-reservations-button" type="button"></button><button id="pedagogy-loans-button" class="manager-button" type="button">Emprunts livres pédagogiques</button><button id="pedagogy-pending-button" class="manager-button pending-reservations-button" type="button"></button><button id="manager-bookings-button" class="manager-button" type="button">Réservations jeux et livres</button></div>';
     $('#home-view').querySelector('.hero').after(dashboard);
     $('#digital-loans-button').addEventListener('click', showDigitalLoans);
     $('#pending-reservations-button').addEventListener('click', showPendingReservations);
     $('#eps-loans-button').addEventListener('click', showEpsLoans);
     $('#eps-pending-button').addEventListener('click', showPendingEpsReservations);
+    $('#pedagogy-loans-button').addEventListener('click', showPedagogyLoans);
+    $('#pedagogy-pending-button').addEventListener('click', showPendingPedagogyReservations);
     $('#manager-bookings-button').addEventListener('click', showManagerBookings);
   }
   dashboard.hidden = !state.manager;
+  if (state.manager && !state.pedagogyLoaded && !state.pedagogyLoading) {
+    state.pedagogyLoading = true;
+    loadPedagogy()
+      .catch((error) => showToast(`Les réservations pédagogiques n’ont pas pu être chargées : ${error.message}`))
+      .finally(() => { state.pedagogyLoading = false; });
+  }
   updatePendingReservationsButton();
   updatePendingEpsButton();
+  updatePendingPedagogyButton();
 }
 window.addEventListener('hashchange', syncManagerButtons);
 syncManagerButtons();
@@ -1167,9 +1389,11 @@ async function logoutManager() {
   $('#series-view').hidden = true;
   $('#digital-view').hidden = true;
   $('#eps-view').hidden = true;
+  $('#pedagogy-view').hidden = true;
   if (location.hash !== '#home') location.hash = '#home';
   try { clearGameSelection(); } catch (error) { console.error('Nettoyage de la sélection des jeux impossible :', error); }
   try { clearBookSelection(); } catch (error) { console.error('Nettoyage de la sélection des séries impossible :', error); }
+  try { clearPedagogySelection(); } catch (error) { console.error('Nettoyage de la sélection des livres pédagogiques impossible :', error); }
   try { clearEquipmentSelection(); } catch (error) { console.error('Nettoyage de la sélection numérique impossible :', error); }
   try { clearEpsSelection(); } catch (error) { console.error('Nettoyage de la sélection EPS impossible :', error); }
   closeManageModal();
@@ -1178,6 +1402,10 @@ async function logoutManager() {
   if (pendingModal) pendingModal.hidden = true;
   const epsPendingModal = $('#eps-pending-modal');
   if (epsPendingModal) epsPendingModal.hidden = true;
+  for (const id of ['pedagogy-loans-modal', 'pedagogy-pending-modal']) {
+    const pedagogyModal = $(`#${id}`);
+    if (pedagogyModal) pedagogyModal.hidden = true;
+  }
   try {
     const response = await fetch('/api/manager/logout', { method: 'POST', cache: 'no-store', credentials: 'same-origin' });
     const result = await response.json().catch(() => ({}));
@@ -1192,6 +1420,8 @@ $('#logout-manager').addEventListener('click', logoutManager);
 function bookingResources(booking) {
   return booking.entries.map((loan) => booking.collection === 'books'
     ? `${state.books.find((item) => item.id === loan.book_id)?.Titre || 'Série'} × ${loan.quantity}`
+    : booking.collection === 'pedagogy'
+      ? loan.book_title || 'Livre pédagogique'
     : booking.collection === 'digital'
       ? `${state.equipment.find((item) => item.id === loan.equipment_id)?.Equipement || loan.equipment_name || 'Équipement'} × ${loan.quantity}`
       : booking.collection === 'eps'
@@ -1209,7 +1439,7 @@ function openManageModal(date, bookingId) {
   $('#manage-date').textContent = formatDate(date);
   $('#manage-list').innerHTML = bookings.map((booking) => {
     const resources = bookingResources(booking);
-    const isEquipment = booking.collection === 'digital' || booking.collection === 'eps';
+    const isEquipment = booking.collection === 'digital' || booking.collection === 'eps' || booking.collection === 'pedagogy';
     const status = isEquipment ? booking.is_approved ? ' · Validée' : ' · En attente de validation' : '';
     const approvalControl = state.manager && isEquipment
       ? `<label class="manager-approval"><input type="checkbox" data-approve-id="${booking.id}" ${booking.is_approved ? 'checked' : ''} ${booking.is_approved && booking.confirmation_sent ? 'disabled' : ''} ${booking.is_approved && !booking.confirmation_sent ? 'title="Cliquer pour réessayer l’envoi du courriel"' : ''}> Validée</label>`
@@ -1245,7 +1475,8 @@ async function approveDigitalBooking(id, control) {
   control.disabled = true;
   try {
     const eps = booking.collection === 'eps';
-    const response = await fetch(eps ? '/api/eps-loans/approve' : '/api/digital-loans/approve', {
+    const pedagogy = booking.collection === 'pedagogy';
+    const response = await fetch(pedagogy ? '/api/pedagogy-loans/approve' : eps ? '/api/eps-loans/approve' : '/api/digital-loans/approve', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ loan_ids: booking.ids.map(Number) }),
@@ -1253,14 +1484,18 @@ async function approveDigitalBooking(id, control) {
     const result = await response.json();
     if (!response.ok) throw new Error(result.detail || 'La validation n’a pas pu être enregistrée dans Grist.');
     const ids = new Set(booking.ids.map(String));
-    const source = eps ? state.epsLoans : state.digitalLoans;
+    const source = pedagogy ? state.pedagogyLoans : eps ? state.epsLoans : state.digitalLoans;
     const updated = source.map((loan) => ids.has(String(loan.id))
-      ? { ...loan, is_approved: true, confirmation_sent: result.email_status === 'sent' }
+        ? { ...loan, is_approved: true, confirmation_sent: result.email_status === 'sent' && result.tracking_status === 'saved' }
       : loan);
-    if (eps) state.epsLoans = updated;
+    if (pedagogy) state.pedagogyLoans = updated;
+    else if (eps) state.epsLoans = updated;
     else state.digitalLoans = updated;
     updatePendingReservationsButton();
-    if (eps) {
+    if (pedagogy) {
+      updatePendingPedagogyButton();
+      if (state.selectedPedagogy.length) renderPedagogyCalendar();
+    } else if (eps) {
       updatePendingEpsButton();
       if (state.selectedEps.length) renderEPSCalendar();
     } else if (state.selectedEquipment.length) renderDigitalCalendar();
@@ -1283,7 +1518,10 @@ async function sendDigitalReminder(id, control) {
   if (!booking) return;
   control.disabled = true;
   try {
-    const response = await fetch(booking.collection === 'eps' ? '/api/eps-loans/reminder' : '/api/digital-loans/reminder', {
+    const reminderEndpoint = booking.collection === 'pedagogy'
+      ? '/api/pedagogy-loans/reminder'
+      : booking.collection === 'eps' ? '/api/eps-loans/reminder' : '/api/digital-loans/reminder';
+    const response = await fetch(reminderEndpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ loan_ids: booking.ids.map(Number) }),
@@ -1315,17 +1553,19 @@ async function returnLoan(id, date) {
   }
   const occupiedUntil = iso(new Date(new Date(`${date}T12:00:00`).getTime() - 86400000));
   const ids = new Set(booking.ids.map(String));
-  const source = booking.collection === 'books' ? state.bookLoans : booking.collection === 'digital' ? state.digitalLoans : booking.collection === 'eps' ? state.epsLoans : state.loans;
+  const source = booking.collection === 'books' ? state.bookLoans : booking.collection === 'pedagogy' ? state.pedagogyLoans : booking.collection === 'digital' ? state.digitalLoans : booking.collection === 'eps' ? state.epsLoans : state.loans;
   const updated = source.map((loan) => ids.has(String(loan.id))
     ? { ...loan, return_date: date, occupied_until: occupiedUntil, is_active: false }
     : loan);
   if (booking.collection === 'books') state.bookLoans = updated;
+  else if (booking.collection === 'pedagogy') state.pedagogyLoans = updated;
   else if (booking.collection === 'digital') state.digitalLoans = updated;
   else if (booking.collection === 'eps') state.epsLoans = updated;
   else state.loans = updated;
   const resources = bookingResources(booking);
   closeManageModal();
   if (booking.collection === 'books') renderSeriesCalendar();
+  else if (booking.collection === 'pedagogy') renderPedagogyCalendar();
   else if (booking.collection === 'digital') renderDigitalCalendar();
   else if (booking.collection === 'eps') renderEPSCalendar();
   else renderCalendar();
@@ -1353,13 +1593,16 @@ async function deleteBooking(id, returnDate) {
   }
   const removedIds = new Set(booking.ids.map(String));
   if (booking.collection === 'books') state.bookLoans = state.bookLoans.filter((loan) => !removedIds.has(String(loan.id)));
+  else if (booking.collection === 'pedagogy') state.pedagogyLoans = state.pedagogyLoans.filter((loan) => !removedIds.has(String(loan.id)));
   else if (booking.collection === 'digital') state.digitalLoans = state.digitalLoans.filter((loan) => !removedIds.has(String(loan.id)));
   else if (booking.collection === 'eps') state.epsLoans = state.epsLoans.filter((loan) => !removedIds.has(String(loan.id)));
   else state.loans = state.loans.filter((loan) => !removedIds.has(String(loan.id)));
   if (booking.collection === 'digital') updatePendingReservationsButton();
   if (booking.collection === 'eps') updatePendingEpsButton();
+  if (booking.collection === 'pedagogy') updatePendingPedagogyButton();
   closeManageModal();
   if (booking.collection === 'books') renderSeriesCalendar();
+  else if (booking.collection === 'pedagogy') renderPedagogyCalendar();
   else if (booking.collection === 'digital') renderDigitalCalendar();
   else if (booking.collection === 'eps') renderEPSCalendar();
   else renderCalendar();
@@ -1373,7 +1616,7 @@ async function deleteBooking(id, returnDate) {
 function printLoan(id) {
   const booking = allBookings().find((item) => item.id === id);
   if (!booking) return;
-  printSheet((booking.collection === 'digital' || booking.collection === 'eps') && !booking.is_approved ? 'Fiche de pré-réservation' : 'Fiche d’emprunt',
+  printSheet((booking.collection === 'digital' || booking.collection === 'eps' || booking.collection === 'pedagogy') && !booking.is_approved ? 'Fiche de pré-réservation' : 'Fiche d’emprunt',
     booking, bookingResources(booking), booking.loan_date, booking.return_date);
 }
 function printSheet(title, borrower, resources, loanDate, returnDate, printWindow = window.open('', '_blank')) { if (!printWindow) return; const resourceList = resources.map((resource) => `<li>${escapeHtml(typeof resource === 'string' ? resource : resource.Jeu)}</li>`).join(''); printWindow.document.open(); printWindow.document.write(`<title>${escapeHtml(title)}</title><style>body{font:16px Arial;max-width:680px;margin:50px auto;color:#182c28}h1{font-size:28px;border-bottom:2px solid #18734a;padding-bottom:14px}h2{font-size:18px;margin-top:32px}p{margin:18px 0}strong{display:block;font-size:12px;text-transform:uppercase;color:#18734a;margin-bottom:5px}li{margin:8px 0}.print-action{border:0;background:#18734a;color:#fff;padding:12px 18px;font:bold 14px Arial;cursor:pointer}@media print{body{margin:20mm auto}.print-action{display:none}}</style><button class="print-action" type="button" onclick="window.print()">Imprimer cette fiche</button><h1>${escapeHtml(title)}</h1><p><strong>Nom</strong>${escapeHtml(borrower.name)}</p><p><strong>Prénom</strong>${escapeHtml(borrower.first_name)}</p><p><strong>Mail professionnel</strong>${escapeHtml(borrower.professional_email)}</p><p><strong>École</strong>${escapeHtml(borrower.school)}</p><h2>Ressources empruntées</h2><ul>${resourceList}</ul><p><strong>Date d’emprunt</strong>${formatDate(loanDate)}</p><p><strong>Date de retour</strong>${formatDate(returnDate)}</p>`); printWindow.document.close(); window.focus(); }
@@ -1382,12 +1625,14 @@ function route() {
   const books = location.hash === '#series';
   const digital = location.hash === '#numerique';
   const eps = location.hash === '#eps';
-  state.collection = eps ? 'eps' : digital ? 'digital' : books ? 'books' : 'games';
-  $('#home-view').hidden = games || books || digital || eps;
+  const pedagogy = location.hash === '#pedagogie';
+  state.collection = pedagogy ? 'pedagogy' : eps ? 'eps' : digital ? 'digital' : books ? 'books' : 'games';
+  $('#home-view').hidden = games || books || digital || eps || pedagogy;
   $('#games-view').hidden = !games;
   $('#series-view').hidden = !books;
   $('#digital-view').hidden = !digital;
   $('#eps-view').hidden = !eps;
+  $('#pedagogy-view').hidden = !pedagogy;
   if (games && !state.games.length) loadGames().catch((error) => {
     $('#games-body').innerHTML = `<tr><td colspan="6" class="loading">${escapeHtml(error.message)}</td></tr>`;
   });
@@ -1409,5 +1654,20 @@ function route() {
   else if (eps) refreshEPSData().then(() => {
     if (state.selectedEps.length) renderEPSCalendar();
   }).catch((error) => console.error('Actualisation du matériel EPS impossible :', error));
+  if (pedagogy && !state.pedagogyLoaded) loadPedagogy().catch((error) => {
+    $('#pedagogy-body').innerHTML = `<tr><td colspan="4" class="loading">${escapeHtml(error.message)}</td></tr>`;
+  });
+  else if (pedagogy) refreshPedagogyData().then(() => {
+    if (state.selectedPedagogy.length) renderPedagogyCalendar();
+  }).catch((error) => console.error('Actualisation des livres pédagogiques impossible :', error));
 }
+$('#pedagogy-previous-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() - 1); renderPedagogyCalendar(); });
+$('#pedagogy-next-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() + 1); renderPedagogyCalendar(); });
+document.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape') return;
+  for (const id of ['pedagogy-loans-modal', 'pedagogy-pending-modal']) {
+    const modal = $(`#${id}`);
+    if (modal && !modal.hidden) modal.hidden = true;
+  }
+});
 window.addEventListener('hashchange', route); window.addEventListener('focus', refreshLoansWhenVisible); document.addEventListener('visibilitychange', refreshLoansWhenVisible); setInterval(refreshLoansWhenVisible, 15000); $('#previous-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() - 1); renderCalendar(); }); $('#next-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() + 1); renderCalendar(); }); $('#series-previous-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() - 1); renderSeriesCalendar(); }); $('#series-next-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() + 1); renderSeriesCalendar(); }); $('#digital-previous-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() - 1); renderDigitalCalendar(); }); $('#digital-next-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() + 1); renderDigitalCalendar(); }); $('#eps-previous-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() - 1); renderEPSCalendar(); }); $('#eps-next-month').addEventListener('click', () => { state.month.setMonth(state.month.getMonth() + 1); renderEPSCalendar(); }); $('#close-modal').addEventListener('click', closeModal); $('#loan-modal').addEventListener('click', (event) => { if (event.target.id === 'loan-modal') closeModal(); }); $('#loan-form').addEventListener('submit', submitLoan); $('#manager-button').addEventListener('click', openManagerModal); $('#manager-modal').addEventListener('click', (event) => { if (event.target.id === 'manager-modal') closeManagerModal(); }); $('#close-manager-modal').addEventListener('click', closeManagerModal); $('#manager-form').addEventListener('submit', loginManager); $('#manage-modal').addEventListener('click', (event) => { if (event.target.id === 'manage-modal') closeManageModal(); }); $('#close-manage-modal').addEventListener('click', closeManageModal); document.addEventListener('keydown', (event) => { if (event.key === 'Escape') { if (!$('#loan-modal').hidden) closeModal(); if (!$('#manager-modal').hidden) closeManagerModal(); if (!$('#manage-modal').hidden) closeManageModal(); const pendingModal = $('#pending-reservations-modal'); if (pendingModal && !pendingModal.hidden) pendingModal.hidden = true; const digitalLoansModal = $('#digital-loans-modal'); if (digitalLoansModal && !digitalLoansModal.hidden) digitalLoansModal.hidden = true; const epsLoansModal = $('#eps-loans-modal'); if (epsLoansModal && !epsLoansModal.hidden) epsLoansModal.hidden = true; const epsPendingModal = $('#eps-pending-modal'); if (epsPendingModal && !epsPendingModal.hidden) epsPendingModal.hidden = true; } }); route();
